@@ -794,13 +794,6 @@ function Dashboard() {
                     </p>
                   </div>
 
-                  <a
-                    href={m.project.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    View official DPWH record ↗
-                  </a>
                   {m.project.livestreamUrl && (
                     <a
                       href={m.project.livestreamUrl}

@@ -69,8 +69,9 @@ export function buildCitations(project: Project): Citation[] {
     : project.lastChecked.slice(0, 10);
 
   // Primary citation: the official DPWH / source record
+  // Label reflects the dataset source, not a guarantee of a live government page.
   citations.push({
-    title: project.name,
+    title: `${project.name} — source record`,
     publisher: project.source ?? project.agency ?? 'Unknown publisher',
     url: project.sourceUrl ?? null,
     accessDate,
