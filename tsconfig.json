@@ -9,10 +9,14 @@
     "strict": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src/main.tsx", "src/supabase.ts", "src/vite-env.d.ts", "vite.config.ts"]
+  "include": ["src/dashboard-entry.tsx", "src/vite-env.d.ts", "vite.config.ts"]
 }
