@@ -37,7 +37,7 @@ import {
   fetchProjectDetail,
   fetchViewportProjects,
   getMapStyleUrl,
-  MapConfigurationError,
+  isMapConfigurationError,
   type PublicRpcClient,
 } from "./public-projects"
 import {
@@ -178,6 +178,7 @@ function ProjectList({
   onSelect,
   onRetry,
   queryError,
+  configurationRequired,
 }: {
   features: ViewportFeature[]
   selectedId: string | null
@@ -186,6 +187,7 @@ function ProjectList({
   onSelect: (feature: ViewportFeature) => void
   onRetry: () => void
   queryError: string | null
+  configurationRequired: boolean
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card">
@@ -224,6 +226,15 @@ function ProjectList({
           </AlertDescription>
         </Alert>
       )}
+      {configurationRequired && (
+        <Alert className="m-3 border-amber-300 bg-amber-50 text-amber-950">
+          <Info aria-hidden="true" />
+          <AlertTitle>Project data configuration required</AlertTitle>
+          <AlertDescription>
+            Configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to load project records.
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto p-2" aria-live="polite">
         {loading && features.length === 0 && (
           <div className="space-y-2 p-2" aria-label="Loading projects">
@@ -232,7 +243,7 @@ function ProjectList({
             ))}
           </div>
         )}
-        {!loading && !queryError && features.length === 0 && (
+        {!loading && !queryError && !configurationRequired && features.length === 0 && (
           <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 p-5 text-center">
             <Search className="size-7 text-muted-foreground" aria-hidden="true" />
             <p className="font-medium">No official projects in this view</p>
@@ -665,9 +676,9 @@ export function ProjectMapSurface() {
     features: [],
     truncated: false,
   })
-  const [queryState, setQueryState] = useState<"loading" | "refreshing" | "ready">(
-    "loading",
-  )
+  const [queryState, setQueryState] = useState<
+    "loading" | "refreshing" | "ready" | "configuration"
+  >("loading")
   const [queryError, setQueryError] = useState<string | null>(null)
   const [styleFailure, setStyleFailure] = useState(false)
   const [detail, setDetail] = useState<ProjectDetail | null>(null)
@@ -697,6 +708,11 @@ export function ProjectMapSurface() {
       setQueryState("ready")
     } catch (error) {
       if (requestId !== requestRef.current) return
+      if (isMapConfigurationError(error)) {
+        setQueryState("configuration")
+        setQueryError(null)
+        return
+      }
       setQueryState(hasResponseRef.current ? "ready" : "loading")
       setQueryError(error instanceof Error ? error.message : "Unable to load projects.")
     }
@@ -804,10 +820,10 @@ export function ProjectMapSurface() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            Official records
+            Source records
           </p>
           <h1 className="font-heading text-2xl font-semibold tracking-tight">
-            Public project map
+            Infrastructure projects
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             Browse source-attributed infrastructure records by documented project location.
@@ -815,7 +831,13 @@ export function ProjectMapSurface() {
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
           {queryState === "refreshing" && <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />}
-          {queryState === "loading" ? "Loading visible projects…" : queryState === "refreshing" ? "Updating this area…" : "Map area ready"}
+          {queryState === "loading"
+            ? "Loading visible projects…"
+            : queryState === "refreshing"
+              ? "Updating this area…"
+              : queryState === "configuration"
+                ? "Project data configuration required"
+                : "Map area ready"}
         </div>
       </div>
 
@@ -831,7 +853,6 @@ export function ProjectMapSurface() {
               onViewportSettled={onViewportSettled}
               onProviderFailure={() => {
                 setStyleFailure(true)
-                void loadViewport(DEFAULT_BOUNDS)
               }}
               mapRef={mapRef}
             />
@@ -880,11 +901,12 @@ export function ProjectMapSurface() {
           <ProjectList
             features={response.features}
             selectedId={selectedId}
-            loading={queryState !== "ready"}
+            loading={queryState === "loading" || queryState === "refreshing"}
             truncated={response.truncated}
             onSelect={selectProject}
             onRetry={() => void loadViewport(lastBoundsRef.current)}
             queryError={queryError}
+            configurationRequired={queryState === "configuration"}
           />
           <ProjectDetailPanel
             selectedId={selectedId}
@@ -920,11 +942,12 @@ export function ProjectMapSurface() {
             <ProjectList
               features={response.features}
               selectedId={selectedId}
-              loading={queryState !== "ready"}
+            loading={queryState === "loading" || queryState === "refreshing"}
               truncated={response.truncated}
               onSelect={selectProject}
-              onRetry={() => void loadViewport(lastBoundsRef.current)}
-              queryError={queryError}
+            onRetry={() => void loadViewport(lastBoundsRef.current)}
+            queryError={queryError}
+            configurationRequired={queryState === "configuration"}
             />
           </div>
         </SheetContent>

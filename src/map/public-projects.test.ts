@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { fetchProjectDetail, fetchViewportProjects } from "./public-projects"
+import {
+  fetchProjectDetail,
+  fetchViewportProjects,
+  isMapConfigurationError,
+  MapConfigurationError,
+} from "./public-projects"
 
 describe("public project data seam", () => {
   it("turns an invalid project ID into a recoverable unavailable detail", async () => {
@@ -37,5 +42,57 @@ describe("public project data seam", () => {
         },
       },
     ])
+  })
+
+  it("keeps missing public-data configuration distinguishable from query failures", () => {
+    const configurationError = new MapConfigurationError("configuration required")
+
+    expect(isMapConfigurationError(configurationError)).toBe(true)
+    expect(isMapConfigurationError(new Error("query failed"))).toBe(false)
+  })
+
+  it("surfaces public viewport and detail query failures to the caller", async () => {
+    const client = {
+      rpc: async () => ({ data: null, error: { message: "temporary outage" } }),
+    }
+
+    await expect(
+      fetchViewportProjects(
+        { south: 10, west: 123, north: 11, east: 124 },
+        client,
+      ),
+    ).rejects.toThrow("temporary outage")
+    await expect(fetchProjectDetail("dpwh-1", client)).rejects.toThrow(
+      "temporary outage",
+    )
+  })
+
+  it("preserves optional official metadata during detail hydration", async () => {
+    const result = await fetchProjectDetail("dpwh-1", {
+      rpc: async () => ({
+        data: {
+          id: "dpwh-1",
+          name: "Bridge improvement",
+          status: "Completed",
+          category: "bridge",
+          latitude: 10.3,
+          longitude: 123.9,
+          amount_paid: 420000,
+          infrastructure_year: "2025",
+          program_name: "Bridge program",
+          source_of_funds: "National government",
+        },
+        error: null,
+      }),
+    })
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        amountPaid: 420000,
+        infrastructureYear: "2025",
+        programName: "Bridge program",
+        sourceOfFunds: "National government",
+      }),
+    )
   })
 })

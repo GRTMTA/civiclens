@@ -18,7 +18,7 @@ import {
 const data = {
   navMain: [
     {
-      title: "Project map",
+      title: "Map",
       url: "/",
       icon: IconMapPin,
     },
@@ -37,7 +37,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             >
               <a href="#">
                 <IconInnerShadowTop className="size-5!" />
-                <span className="text-base font-semibold">Official records</span>
+                <span className="text-base font-semibold">Source map</span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>

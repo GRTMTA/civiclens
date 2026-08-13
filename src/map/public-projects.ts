@@ -21,6 +21,12 @@ export class MapConfigurationError extends Error {
   }
 }
 
+export function isMapConfigurationError(
+  error: unknown,
+): error is MapConfigurationError {
+  return error instanceof MapConfigurationError
+}
+
 export function getMapStyleUrl(): string | null {
   const value = import.meta.env.VITE_MAP_STYLE_URL?.trim()
   return value || null
