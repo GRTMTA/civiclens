@@ -166,6 +166,10 @@ export async function createReport(input:{projectId:string;category:string;note:
   });
   if (error) {
     if (photoPath) await supabase.storage.from('report-photos').remove([photoPath]);
+    // Translate the rate-limit sentinel into a user-friendly message
+    if (error.message?.includes('report_rate_limit_exceeded')) {
+      throw new Error('You have reached the report limit. Please wait before submitting again.');
+    }
     throw error;
   }
 }
