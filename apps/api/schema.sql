@@ -1,4 +1,0 @@
-CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE TABLE projects (id text primary key, source text not null, source_url text not null, name text not null, category text not null, description text, agency text, contractor text, budget numeric, status text, progress numeric, location text, coordinates geography(point,4326), last_checked timestamptz not null);
-CREATE TABLE reports (id uuid primary key, project_id text references projects(id), author_id text not null, author_name text not null, category text not null, note text not null, photo_url text, coordinates geography(point,4326), status text not null default 'unverified', created_at timestamptz not null default now());
-CREATE TABLE moderation_events (id bigserial primary key, report_id uuid references reports(id), admin_id text not null, action text not null, reason text, created_at timestamptz not null default now());

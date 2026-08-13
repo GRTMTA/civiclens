@@ -1,7 +1,10 @@
 {
   "name": "civiclens",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
-  "scripts": {"dev": "concurrently \"npm run dev -w @civiclens/api\" \"npm run dev -w @civiclens/web\"", "build": "npm run build -ws", "test": "npm run test -ws"},
-  "devDependencies": {"concurrently": "^9.1.2"}
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "npm run dev --prefix apps/web",
+    "build": "npm run build --prefix apps/web",
+    "test": "npm run test --prefix apps/web -- --passWithNoTests"
+  }
 }

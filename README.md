@@ -1,29 +1,40 @@
 # CivicLens
 
-CivicLens is a Cebu City transparency PWA prototype. It uses a phone camera, location evidence, official project records, and Groq vision to help residents identify public infrastructure and publish clearly labelled community reports.
+CivicLens is a Cebu City transparency PWA using Supabase Auth, Postgres/PostGIS, private Storage, Edge Functions, and Groq vision.
 
-## Run locally
+## Local setup
+
+1. Install dependencies: `npm install`
+2. Install the Supabase CLI, then run `supabase start`
+3. Copy `.env.example` to `.env.local` and add the local project URL and publishable key from `supabase status`
+4. Add server secrets with `supabase secrets set GROQ_API_KEY=... GROQ_MODEL=qwen/qwen3.6-27b`
+5. Run the web app with `npm run dev`
+
+Without `GROQ_API_KEY`, scans use a safe demo analysis. The local seed includes one DPWH-shaped project fixture.
+
+## Architecture
+
+- `apps/web`: React and Vite client using Supabase Auth, database, Storage, and Functions
+- `supabase/migrations`: PostGIS schema, profile provisioning, RLS policies, and database functions
+- `supabase/functions/scan-project`: authenticated Groq image analysis and project matching
+- `supabase/seed.sql`: local demonstration data
+
+Report photos are private and stored under the authenticated user's folder. Groq credentials are Edge Function secrets and must never use the `VITE_` prefix.
+
+## Deploy
+
+Link the CLI to a development project before applying changes:
 
 ```bash
-npm install
-cp .env.example .env
-npm run dev
+supabase link --project-ref <project-ref>
+supabase db push
+supabase functions deploy scan-project
+supabase secrets set GROQ_API_KEY=... GROQ_MODEL=qwen/qwen3.6-27b
 ```
-
-- Web: http://localhost:5173
-- API: http://localhost:3000/health
-
-Without `GROQ_API_KEY`, scans use a safe demo analysis and the seeded DPWH-shaped fixture so the camera flow can be demonstrated. With a key, the API sends images to Groq server-side; never put that key in Vite environment variables.
-
-## Current integration boundaries
-
-The source adapter interface is in `apps/api/src/providers.ts`. It currently contains a Cebu demo record and empty official fallbacks because the DPWH/Open Data portals do not expose a stable common API. Replace those adapter methods with approved fetch/parsing implementations before production use.
-
-The report route currently uses an in-memory store for the hackathon demo. `apps/api/schema.sql` defines the PostGIS-backed persistence model for wiring to PostgreSQL.
 
 ## Checks
 
 ```bash
 npm run build
-npm test -w @civiclens/api
+npm test
 ```
