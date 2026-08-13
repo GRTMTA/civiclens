@@ -17,9 +17,10 @@ import {
   supabase,
   type ReportItem,
 } from "./supabase";
-import pristine from "./assests/city-pristine.jpg";
-import damaged from "./assests/city-damaged.jpg";
+import pristine from "./assests/city-pristine.png";
+import damaged from "./assests/city-damaged.png";
 import "./styles.css";
+import "./auth.css";
 
 type Project = {
   id: string;
@@ -56,6 +57,17 @@ type ScanResult = {
 };
 
 const SPOTLIGHT_RADIUS = 240;
+
+function money(amount: number | undefined): string {
+  if (amount == null) return "Not reported";
+  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 0 }).format(amount);
+}
+
+function shortDate(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-PH", { year: "numeric", month: "short" });
+}
 
 function Landing({ onSignIn }: { onSignIn: () => void }) {
   const mouse = useRef({ x: -999, y: -999 });
@@ -165,97 +177,248 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
   );
 }
 
-function AuthForm({ onBack }: { onBack: () => void }) {
+function AuthForm({
+  mode,
+  onBack,
+  onModeChange,
+}: {
+  mode: "sign-in" | "sign-up";
+  onBack: () => void;
+  onModeChange: (mode: "sign-in" | "sign-up") => void;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
-  const submit = async (mode: "sign-in" | "sign-up") => {
+  const [loading, setLoading] = useState(false);
+  const isRegistration = mode === "sign-up";
+
+  // Clear all fields whenever the mode changes so the destination form is always empty.
+  useEffect(() => {
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
     setMessage("");
-    const result =
-      mode === "sign-in"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({
-            email,
-            password,
-            options: { data: { display_name: email.split("@")[0] } },
-          });
-    setMessage(
-      result.error?.message ??
-        (mode === "sign-up" ? "Check your email to confirm your account." : ""),
-    );
+    document.title = `${mode === "sign-up" ? "Create account" : "Log in"} — CivicLens`;
+  }, [mode]);
+
+  const clearRegistrationFields = () => {
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
   };
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setMessage("");
+
+    if (isRegistration && password !== confirmPassword) {
+      setMessage("Passwords do not match. Please check and try again.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      if (isRegistration) {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { display_name: email.split("@")[0] },
+            emailRedirectTo: window.location.origin,
+          },
+        });
+
+        // Supabase signals a duplicate email in two ways:
+        // 1. error.message === "User already registered" (email confirmation disabled)
+        // 2. data.user exists but data.user.identities is an empty array
+        //    (email confirmation enabled — Supabase avoids enumeration but signals
+        //    the duplicate via an empty identities list)
+        const isDuplicate =
+          error?.message === "User already registered" ||
+          (data.user !== null && data.user.identities?.length === 0);
+
+        if (isDuplicate) {
+          setMessage("This account already exists.");
+          clearRegistrationFields();
+          return;
+        }
+
+        if (error) {
+          setMessage(error.message);
+          return;
+        }
+
+        // Session is null when email confirmation is still required (hosted project
+        // with confirmations enabled). In that case tell the user to check their
+        // email. When confirmations are disabled a session arrives immediately and
+        // onAuthStateChange("SIGNED_IN") will redirect to the dashboard before this
+        // message would ever be seen — but we set it anyway as a safe fallback.
+        if (!data.session) {
+          setMessage("Check your email to activate your CivicLens account.");
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        setMessage(error?.message ?? "");
+      }
+    } catch {
+      setMessage("CivicLens couldn't verify your access. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <main>
-      <header>
-        <div className="brand">
-          <ShieldCheck /> CivicLens
-        </div>
-        <button className="secondary compact" onClick={onBack}>
-          Back
-        </button>
-      </header>
-      <section className="auth card">
-        <div>
-          <p className="eyebrow">COMMUNITY ACCESS</p>
-          <h1>Sign in to CivicLens.</h1>
-          <p className="muted">
-            An account keeps scans and community reports attributable and
-            protected.
-          </p>
-          <label>
-            Email
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              autoComplete="current-password"
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-          <div className="actions">
-            <button className="primary" onClick={() => submit("sign-in")}>
-              Sign in
-            </button>
-            <button className="secondary" onClick={() => submit("sign-up")}>
-              Create account
-            </button>
+    <main className="auth-shell">
+      <section className="auth-visual" aria-label="CivicLens community infrastructure monitoring">
+        <video autoPlay muted loop playsInline preload="auto" aria-hidden="true">
+          <source
+            src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260813_052122_e77a27e6-17f1-4794-889b-3ceaa0e9e8cb.mp4"
+            type="video/mp4"
+          />
+        </video>
+        <div className="auth-scrim" />
+        <div className="auth-promise">
+          <div className="auth-badge">
+            <svg viewBox="0 0 582 557" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                d="M449 0h-14l-20 10-215 239-13 27 2 23 23 27 20 6 57 2v182l12 27 23 13h22l28-20 199-225 9-23-3-24-20-24-20-7-61-3V32l-8-19zM442 38l4 212 20 17 74 3 7 15-206 235-9 2-8-8-3-200-14-14-12-3h-62l-9-6-3-9zM1 67l3 14 13 9h199l7-3 9-13-4-17-13-8H18L5 57zM0 285l4 15 13 8h88l13-9 3-8-2-13-8-8-8-3H17l-13 8zM1 495l3 16 6 6 13 3h156l12-4 9-16-4-12-14-9H18l-9 4z"
+              />
+            </svg>
+            <span>Public projects, clearly tracked</span>
           </div>
-          {message && (
-            <p className="muted" role="status">
-              {message}
+          <p className="auth-headline">
+            <span>See What Your City Builds</span>
+            <span>Clearly</span>
+          </p>
+        </div>
+      </section>
+
+      <section className="auth-pane">
+        <div className="auth-card">
+          <button type="button" className="auth-back" onClick={onBack} aria-label="Back to CivicLens home">
+            <span aria-hidden="true">←</span> CivicLens
+          </button>
+
+          <form className="auth-form" onSubmit={submit}>
+            <div className="auth-intro">
+              <p className="auth-kicker">CIVICLENS COMMUNITY ACCESS</p>
+              <h1>{isRegistration ? "Join CivicLens" : "Welcome back"}</h1>
+              <p>
+                {isRegistration ? (
+                  "Track public works, document local conditions, and help your community demand accountability."
+                ) : (
+                  <><strong>Log in</strong> to review scans, track projects, and manage community reports.</>
+                )}
+              </p>
+            </div>
+
+            <label className="auth-field">
+              <span>Email address</span>
+              <input
+                type="email"
+                autoComplete="email"
+                aria-label="Email address"
+                placeholder="Your email address"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+            <label className="auth-field">
+              <span>{isRegistration ? "Create Password" : "Password"}</span>
+              <input
+                type="password"
+                autoComplete={isRegistration ? "new-password" : "current-password"}
+                aria-label={isRegistration ? "Create Password" : "Password"}
+                placeholder={isRegistration ? "Create a password (8+ characters)" : "Your password"}
+                minLength={8}
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+            {isRegistration && (
+              <label className="auth-field">
+                <span>Confirm Password</span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  aria-label="Confirm Password"
+                  placeholder="Re-enter your password"
+                  minLength={8}
+                  required
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
+              </label>
+            )}
+
+            <button className="auth-submit" type="submit" disabled={loading}>
+              <span>
+                {loading
+                  ? isRegistration ? "Creating your account…" : "Checking your access…"
+                  : isRegistration ? "Create CivicLens account" : "Log in to CivicLens"}
+              </span>
+              {!loading && (
+                <svg viewBox="0 0 22 22" aria-hidden="true">
+                  <path d="M3 11h15.4M11 3.3l7.7 7.7-7.7 7.7" />
+                </svg>
+              )}
+            </button>
+
+            {message && <p className="auth-message" role="status">{message}</p>}
+
+            <p className="auth-switch">
+              {isRegistration ? "Already monitoring with CivicLens? " : "New to CivicLens? "}
+              <button
+                type="button"
+                onClick={() => onModeChange(isRegistration ? "sign-in" : "sign-up")}
+              >
+                {isRegistration ? "Log in" : "Create an account"}
+              </button>
             </p>
-          )}
+          </form>
         </div>
       </section>
     </main>
   );
 }
 
+function getConfirmationError(): string | null {
+  const hash = window.location.hash.slice(1);
+  if (!hash) return null;
+  const params = new URLSearchParams(hash);
+  const error = params.get("error");
+  if (!error) return null;
+  const description = params.get("error_description") ?? "The confirmation link is invalid or has expired.";
+  // Supabase uses underscores in the description; replace them for readability.
+  return description.replace(/_/g, " ");
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [showAuth, setShowAuth] = useState(
-    () => window.location.pathname === "/login",
-  );
-  const openLogin = () => {
-    window.history.pushState({}, "", "/login");
-    setShowAuth(true);
+  const [confirmError, setConfirmError] = useState<string | null>(getConfirmationError);
+  const getAuthMode = () => {
+    if (window.location.pathname === "/register") return "sign-up" as const;
+    if (window.location.pathname === "/login") return "sign-in" as const;
+    return null;
+  };
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up" | null>(getAuthMode);
+  const navigateAuth = (mode: "sign-in" | "sign-up") => {
+    window.history.pushState({}, "", mode === "sign-up" ? "/register" : "/login");
+    setAuthMode(mode);
   };
   const openLanding = () => {
     window.history.pushState({}, "", "/");
-    setShowAuth(false);
+    document.title = "CivicLens";
+    setAuthMode(null);
   };
   useEffect(() => {
-    const onPopState = () => setShowAuth(window.location.pathname === "/login");
+    const onPopState = () => setAuthMode(getAuthMode());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -264,9 +427,17 @@ function App() {
       setSession(data.session);
       setAuthReady(true);
     });
-    const { data } = supabase.auth.onAuthStateChange((_event, next) =>
-      setSession(next),
-    );
+    const { data } = supabase.auth.onAuthStateChange((event, next) => {
+      setSession(next);
+      if (event === "SIGNED_IN") {
+        setConfirmError(null);
+        window.history.replaceState({}, "", "/");
+        setAuthMode(null);
+      } else if (event === "SIGNED_OUT") {
+        window.history.replaceState({}, "", "/");
+        setAuthMode(null);
+      }
+    });
     return () => data.subscription.unsubscribe();
   }, []);
   if (!authReady)
@@ -275,12 +446,52 @@ function App() {
         <p className="muted">Loading CivicLens…</p>
       </main>
     );
-  if (!session)
-    return showAuth ? (
-      <AuthForm onBack={openLanding} />
+  if (!session) {
+    if (confirmError)
+      return (
+        <main className="auth-shell">
+          <section className="auth-visual" aria-label="CivicLens community infrastructure monitoring">
+            <video autoPlay muted loop playsInline preload="auto" aria-hidden="true">
+              <source
+                src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260813_052122_e77a27e6-17f1-4794-889b-3ceaa0e9e8cb.mp4"
+                type="video/mp4"
+              />
+            </video>
+            <div className="auth-scrim" />
+          </section>
+          <section className="auth-pane">
+            <div className="auth-card">
+              <button type="button" className="auth-back" onClick={() => { window.history.replaceState({}, "", "/"); setConfirmError(null); }} aria-label="Back to CivicLens home">
+                <span aria-hidden="true">←</span> CivicLens
+              </button>
+              <div className="auth-form" style={{ textAlign: "center" }}>
+                <div className="auth-intro">
+                  <p className="auth-kicker">EMAIL CONFIRMATION</p>
+                  <h1>Link expired</h1>
+                  <p>This confirmation link is no longer valid.</p>
+                </div>
+                <p className="auth-message" role="alert" style={{ margin: "0 0 24px" }}>{confirmError}</p>
+                <button
+                  className="auth-submit"
+                  type="button"
+                  onClick={() => { window.history.replaceState({}, "", "/login"); setConfirmError(null); setAuthMode("sign-in"); }}
+                >
+                  <span>Log in to CivicLens</span>
+                  <svg viewBox="0 0 22 22" aria-hidden="true">
+                    <path d="M3 11h15.4M11 3.3l7.7 7.7-7.7 7.7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </section>
+        </main>
+      );
+    return authMode ? (
+      <AuthForm key={authMode} mode={authMode} onBack={openLanding} onModeChange={navigateAuth} />
     ) : (
-      <Landing onSignIn={openLogin} />
+      <Landing onSignIn={() => navigateAuth("sign-in")} />
     );
+  }
   return <Dashboard />;
 }
 
