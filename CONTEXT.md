@@ -133,3 +133,43 @@ _Avoid_: permanent legacy surface, second application shell
 
 An authorized reviewer who evaluates observations, manages their visibility, and records moderation decisions.
 _Avoid_: investigator, judge
+
+### Map viewport
+
+The geographic area currently visible to a Resident in Explore, defined by the map's center, zoom, and visible bounds.
+_Avoid_: the entire city dataset, the Resident's exact location
+
+### Visible project set
+
+The Official-source records returned for the current Map viewport; it may be bounded for performance and is not automatically the complete set of projects in that area.
+_Avoid_: all projects in the area, complete project inventory
+
+### Truncated map result
+
+A Visible project set that reached the server's result limit and therefore requires the Resident to zoom in before treating the displayed set as complete for a smaller area.
+_Avoid_: hidden projects, complete cluster count
+
+### Project summary
+
+A concise presentation of an Official-source record selected from Explore, with the record's primary identity and status first, supporting official details second, and provenance always visible.
+_Avoid_: physical-condition verdict, confirmed match
+
+### Viewport feature
+
+A lightweight map representation of an Official-source record used to render and select a project in the current Map viewport; it is not the complete project record or Evidence.
+_Avoid_: full project data, project proof
+
+### Project detail
+
+The expanded Official-source record shown after a Resident selects a Viewport feature, including supporting metadata and provenance when available; it does not establish current physical conditions.
+_Avoid_: verified site condition, confirmed physical match
+
+### Display status
+
+A bounded presentation category derived from an Official status for map legends and filtering; the original source status remains available and is not replaced by the display category.
+_Avoid_: CivicLens verdict, real-world condition
+
+### Map camera
+
+The current Explore view defined by map center, zoom, and visible bounds; it describes browsing context and is not a Resident's Capture point.
+_Avoid_: resident location, project location
