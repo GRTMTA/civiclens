@@ -1,0 +1,7 @@
+import type { Coordinates, InfrastructureCategory, Project } from '@civiclens/shared';
+
+const now = () => new Date().toISOString();
+const demo: Project[] = [{id:'dpwh-23HH0042',source:'DPWH Transparency Portal',sourceUrl:'https://transparency.dpwh.gov.ph/',name:'Construction of Babag Health Center and Wellness Camp',category:'facility',description:'Construction of a public health facility in Cebu City.',agency:'Department of Public Works and Highways',contractor:'Corro Construction',budget:18500000,status:'In progress',progress:72,location:'Babag, Cebu City',coordinates:{latitude:10.325,longitude:123.905},lastChecked:now(),documents:[]}];
+export interface SourceAdapter { name:string; search(input:{coordinates:Coordinates; category:InfrastructureCategory; clues:string[]}):Promise<Project[]>; }
+export const adapters:SourceAdapter[] = [{name:'DPWH Transparency Portal',async search({coordinates,category}) { return demo.filter(p=>p.category===category || category==='unknown').map(p=>({...p,lastChecked:now(),coordinates})); }},{name:'Open Data Philippines',async search(){return [];}},{name:'Cebu official sources',async search(){return [];}}];
+export async function findProjects(input:{coordinates:Coordinates;category:InfrastructureCategory;clues:string[]}) { const results:Project[]=[]; for (const adapter of adapters) results.push(...await adapter.search(input)); return [...new Map(results.map(p=>[p.id,p])).values()]; }
