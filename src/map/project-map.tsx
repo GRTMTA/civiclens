@@ -81,6 +81,13 @@ const STATUS_CLASSES: Record<DisplayStatus, string> = {
   unknown: "border-slate-300 bg-slate-100 text-slate-800",
 }
 
+const STATUS_DOT_CLASSES: Record<DisplayStatus, string> = {
+  ongoing: "bg-amber-600",
+  completed: "bg-emerald-600",
+  planned: "bg-indigo-600",
+  unknown: "bg-slate-500",
+}
+
 function statusLabel(status: DisplayStatus) {
   return STATUS_LABELS[status]
 }
@@ -371,6 +378,32 @@ function ProjectDetailContent({
             <dt className="text-muted-foreground">Completion date</dt>
             <dd className="text-right">{formatDate(detail.completionDate)}</dd>
           </div>
+          <div className="flex justify-between gap-4 border-b pb-2">
+            <dt className="text-muted-foreground">Progress</dt>
+            <dd className="text-right">
+              {detail.progress === undefined ? "Not provided" : `${detail.progress}%`}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4 border-b pb-2">
+            <dt className="text-muted-foreground">Amount paid</dt>
+            <dd className="text-right">{formatMoney(detail.amountPaid)}</dd>
+          </div>
+          <div className="flex justify-between gap-4 border-b pb-2">
+            <dt className="text-muted-foreground">Infrastructure year</dt>
+            <dd className="text-right">{detail.infrastructureYear ?? "Not provided"}</dd>
+          </div>
+          <div className="flex justify-between gap-4 border-b pb-2">
+            <dt className="text-muted-foreground">Program</dt>
+            <dd className="text-right">{detail.programName ?? "Not provided"}</dd>
+          </div>
+          <div className="flex justify-between gap-4 border-b pb-2">
+            <dt className="text-muted-foreground">Source of funds</dt>
+            <dd className="text-right">{detail.sourceOfFunds ?? "Not provided"}</dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-muted-foreground">Last checked</dt>
+            <dd className="text-right">{formatDate(detail.lastChecked)}</dd>
+          </div>
         </dl>
       </section>
 
@@ -527,6 +560,16 @@ function OfficialProjectMap({
       mapStyle={styleUrl}
       interactiveLayerIds={["project-clusters", "projects-unclustered"]}
       onClick={handleClick}
+      onLoad={(event) =>
+        onViewportSettled(
+          boundsFromMap(event.target),
+          {
+            latitude: event.target.getCenter().lat,
+            longitude: event.target.getCenter().lng,
+            zoom: event.target.getZoom(),
+          },
+        )
+      }
       onMoveEnd={(event) =>
         onViewportSettled(
           boundsFromMap(event.target),
@@ -634,6 +677,8 @@ export function ProjectMapSurface() {
   const mapRef = useRef<MapRef | null>(null)
   const clientRef = useRef<PublicRpcClient | null>(null)
   const requestRef = useRef(0)
+  const detailRequestRef = useRef(0)
+  const viewportTimerRef = useRef<number | null>(null)
   const hasResponseRef = useRef(false)
   const lastBoundsRef = useRef(DEFAULT_BOUNDS)
   const styleUrl = getMapStyleUrl()
@@ -658,8 +703,17 @@ export function ProjectMapSurface() {
   }, [])
 
   useEffect(() => {
-    void loadViewport(DEFAULT_BOUNDS)
-  }, [loadViewport])
+    if (!styleUrl) void loadViewport(DEFAULT_BOUNDS)
+  }, [loadViewport, styleUrl])
+
+  useEffect(
+    () => () => {
+      if (viewportTimerRef.current !== null) {
+        window.clearTimeout(viewportTimerRef.current)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     const feature = response.features.find((item) => item.id === selectedId) ?? null
@@ -668,23 +722,27 @@ export function ProjectMapSurface() {
 
   const loadDetails = useCallback(async () => {
     if (!selectedId) return
+    const requestId = ++detailRequestRef.current
     setDetailLoading(true)
     setDetailError(null)
     setDetail(null)
     try {
       if (!clientRef.current) clientRef.current = createPublicRpcClient()
       const nextDetail = await fetchProjectDetail(selectedId, clientRef.current)
+      if (requestId !== detailRequestRef.current) return
       setDetail(nextDetail)
     } catch (error) {
+      if (requestId !== detailRequestRef.current) return
       setDetailError(error instanceof Error ? error.message : "Unable to load project details.")
     } finally {
-      setDetailLoading(false)
+      if (requestId === detailRequestRef.current) setDetailLoading(false)
     }
   }, [selectedId])
 
   useEffect(() => {
     if (selectedId) void loadDetails()
     else {
+      detailRequestRef.current += 1
       setDetail(null)
       setDetailError(null)
       setDetailLoading(false)
@@ -728,7 +786,12 @@ export function ProjectMapSurface() {
       setCamera(nextCamera)
       const search = writeCameraSearch(window.location.search, nextCamera)
       window.history.replaceState(null, "", `${window.location.pathname}?${search}`)
-      void loadViewport(bounds)
+      if (viewportTimerRef.current !== null) {
+        window.clearTimeout(viewportTimerRef.current)
+      }
+      viewportTimerRef.current = window.setTimeout(() => {
+        void loadViewport(bounds)
+      }, 250)
     },
     [loadViewport],
   )
@@ -766,7 +829,10 @@ export function ProjectMapSurface() {
               camera={camera}
               onSelect={selectProject}
               onViewportSettled={onViewportSettled}
-              onProviderFailure={() => setStyleFailure(true)}
+              onProviderFailure={() => {
+                setStyleFailure(true)
+                void loadViewport(DEFAULT_BOUNDS)
+              }}
               mapRef={mapRef}
             />
           ) : (
@@ -802,7 +868,7 @@ export function ProjectMapSurface() {
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
               {(Object.keys(STATUS_LABELS) as DisplayStatus[]).map((status) => (
                 <div key={status} className="flex items-center gap-1.5">
-                  <span className={`size-2.5 rounded-full ${status === "ongoing" ? "bg-amber-600" : status === "completed" ? "bg-emerald-600" : status === "planned" ? "bg-indigo-600" : "bg-slate-500"}`} aria-hidden="true" />
+                  <span className={`size-2.5 rounded-full ${STATUS_DOT_CLASSES[status]}`} aria-hidden="true" />
                   <span>{statusLabel(status)}</span>
                 </div>
               ))}

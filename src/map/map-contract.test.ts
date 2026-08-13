@@ -22,6 +22,7 @@ describe("official project map contract", () => {
       "unknown",
     )
     expect(normalizeOfficialStatus(null)).toBe("unknown")
+    expect(normalizeOfficialStatus("Incomplete documentation")).toBe("unknown")
   })
 
   it("parses a truncated lightweight viewport response", () => {

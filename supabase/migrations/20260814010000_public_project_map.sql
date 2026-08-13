@@ -98,6 +98,7 @@ as $$
     'agency', p.agency,
     'contractor', p.contractor,
     'budget', p.budget,
+    'amount_paid', p.amount_paid,
     'status', p.status,
     'progress', p.progress,
     'location', p.location,

@@ -38,6 +38,7 @@ export type ProjectDetail = {
   agency: string
   contractor?: string
   budget?: number
+  amountPaid?: number
   status: string
   displayStatus: DisplayStatus
   progress?: number
@@ -84,20 +85,23 @@ function asCoordinates(value: unknown): [number, number] | null {
 
 export function normalizeOfficialStatus(value: string | null | undefined): DisplayStatus {
   const status = value?.trim().toLowerCase() ?? ""
+  const normalized = status.replace(/[_-]+/g, " ")
 
   if (
-    status.includes("pre-construction") ||
-    status.includes("preconstruction") ||
-    status.includes("planned") ||
-    status.includes("proposed") ||
-    status.includes("not started")
+    normalized.includes("pre construction") ||
+    normalized.includes("planned") ||
+    normalized.includes("proposed") ||
+    normalized.includes("not started")
   ) {
     return "planned"
   }
 
+  if (normalized.includes("incomplete") || normalized.includes("not complete")) {
+    return "unknown"
+  }
+
   if (
-    status.includes("complete") ||
-    status.includes("finished")
+    /\b(completed|complete|finished)\b/.test(normalized)
   ) {
     return "completed"
   }
@@ -167,6 +171,7 @@ export function parseProjectDetail(value: unknown): ProjectDetail | null {
     agency: asString(project.agency, "Not provided"),
     contractor: asOptionalString(project.contractor),
     budget: asOptionalNumber(project.budget),
+    amountPaid: asOptionalNumber(project.amount_paid),
     status: asString(project.status, "Unknown"),
     displayStatus: normalizeOfficialStatus(asString(project.status)),
     progress: asOptionalNumber(project.progress),
