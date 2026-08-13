@@ -6,5 +6,10 @@ dist
 supabase/.temp
 *.tsbuildinfo
 coverage
+data/raw/
+data/generated/
+*.parquet
+.venv-dpwh/
+__pycache__/
 .DS_Store
 .vscode

@@ -72,14 +72,24 @@ Deno.serve(async request => {
       p_latitude: coordinates.latitude,
       p_longitude: coordinates.longitude,
       p_radius_meters: 25000,
+      p_category: analysis.category === 'unknown' ? null : analysis.category,
     });
     if (error) throw error;
     const projects:Project[] = (data ?? []).map((row:any) => ({
-      id:row.id, source:row.source, sourceUrl:row.source_url, name:row.name,
-      category:row.category, description:row.description, agency:row.agency,
+      id:row.id, contractId:row.contract_id ?? undefined, source:row.source, sourceUrl:row.source_url, name:row.name,
+      category:row.category, sourceCategory:row.source_category ?? undefined,
+      componentCategories:Array.isArray(row.component_categories) ? row.component_categories : [],
+      description:row.description, agency:row.agency,
       contractor:row.contractor ?? undefined, budget:row.budget == null ? undefined : Number(row.budget),
+      amountPaid:row.amount_paid == null ? undefined : Number(row.amount_paid),
       status:row.status, progress:row.progress == null ? undefined : Number(row.progress),
-      location:row.location, coordinates:{latitude:Number(row.latitude), longitude:Number(row.longitude)},
+      location:row.location, region:row.region ?? undefined, districtOffice:row.district_office ?? undefined,
+      programName:row.program_name ?? undefined, infrastructureYear:row.infrastructure_year ?? undefined,
+      startDate:row.start_date ?? undefined, completionDate:row.completion_date ?? undefined,
+      sourceOfFunds:row.source_of_funds ?? undefined, livestreamUrl:row.livestream_url ?? undefined,
+      hasSatelliteImage:Boolean(row.has_satellite_image), sourceRevision:row.source_revision ?? undefined,
+      sourceImportedAt:row.source_imported_at ?? undefined,
+      coordinates:{latitude:Number(row.latitude), longitude:Number(row.longitude)},
       lastChecked:row.last_checked, documents:Array.isArray(row.documents) ? row.documents : [],
     }));
     const clues = [...analysis.clues, ...analysis.identifiers];
