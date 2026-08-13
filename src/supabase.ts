@@ -37,6 +37,73 @@ export async function listReports():Promise<ReportItem[]> {
   }));
 }
 
+// ── Comment threads ──────────────────────────────────────────────────────────
+
+export type CommentItem = {
+  id: string;
+  reportId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  hidden: boolean;
+  createdAt: string;
+};
+
+/** Fetch all visible comments for a report (RLS filters hidden ones for non-mods). */
+export async function listComments(reportId: string): Promise<CommentItem[]> {
+  const {data, error} = await supabase
+    .from('report_comments')
+    .select('id, report_id, author_id, author_name, body, hidden, created_at')
+    .eq('report_id', reportId)
+    .order('created_at', {ascending: true});
+  if (error) throw error;
+  return (data ?? []).map(c => ({
+    id: c.id,
+    reportId: c.report_id,
+    authorId: c.author_id,
+    authorName: c.author_name,
+    body: c.body,
+    hidden: c.hidden,
+    createdAt: c.created_at,
+  }));
+}
+
+/** Post a comment via the server-side function (validates & stamps author name). */
+export async function postComment(reportId: string, body: string): Promise<string> {
+  const trimmed = body.trim();
+  if (trimmed.length === 0) throw new Error('Comment cannot be empty.');
+  if (trimmed.length > 1000) throw new Error('Comment exceeds 1000 characters.');
+  const {data, error} = await supabase.rpc('post_comment', {
+    p_report_id: reportId,
+    p_body: trimmed,
+  });
+  if (error) {
+    // Surface the real DB message (e.g. function not found, validation errors)
+    throw new Error(error.message || error.details || 'Failed to post comment.');
+  }
+  return data as string;
+}
+
+/** Delete a comment. Authors can delete their own; moderators can delete any. */
+export async function deleteComment(commentId: string): Promise<void> {
+  const {error} = await supabase
+    .from('report_comments')
+    .delete()
+    .eq('id', commentId);
+  if (error) throw error;
+}
+
+/** Toggle the hidden flag on a comment (moderator only). */
+export async function setCommentHidden(commentId: string, hidden: boolean): Promise<void> {
+  const {error} = await supabase.rpc('hide_comment', {
+    p_comment_id: commentId,
+    p_hidden: hidden,
+  });
+  if (error) throw error;
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
 export async function createReport(input:{projectId:string;category:string;note:string;latitude:number;longitude:number;photo?:File}) {
   const {data:{user}} = await supabase.auth.getUser();
   if (!user) throw new Error('Sign in to publish a report.');
