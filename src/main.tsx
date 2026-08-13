@@ -20,6 +20,7 @@ import {
 import pristine from "./assests/city-pristine.jpg";
 import damaged from "./assests/city-damaged.jpg";
 import "./styles.css";
+import "./auth.css";
 
 type Project = {
   id: string;
@@ -165,75 +166,149 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
   );
 }
 
-function AuthForm({ onBack }: { onBack: () => void }) {
+function AuthForm({
+  mode,
+  onBack,
+  onModeChange,
+}: {
+  mode: "sign-in" | "sign-up";
+  onBack: () => void;
+  onModeChange: (mode: "sign-in" | "sign-up") => void;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
-  const submit = async (mode: "sign-in" | "sign-up") => {
+  const [loading, setLoading] = useState(false);
+  const isRegistration = mode === "sign-up";
+
+  useEffect(() => {
+    document.title = `${isRegistration ? "Create account" : "Log in"} — CivicLens`;
+  }, [isRegistration]);
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setMessage("");
-    const result =
-      mode === "sign-in"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({
+    setLoading(true);
+
+    try {
+      const result = isRegistration
+        ? await supabase.auth.signUp({
             email,
             password,
             options: { data: { display_name: email.split("@")[0] } },
-          });
-    setMessage(
-      result.error?.message ??
-        (mode === "sign-up" ? "Check your email to confirm your account." : ""),
-    );
+          })
+        : await supabase.auth.signInWithPassword({ email, password });
+
+      setMessage(
+        result.error?.message ??
+          (isRegistration
+            ? "Check your email to activate your CivicLens account."
+            : ""),
+      );
+    } catch {
+      setMessage("CivicLens couldn't verify your access. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
+
   return (
-    <main>
-      <header>
-        <div className="brand">
-          <ShieldCheck /> CivicLens
-        </div>
-        <button className="secondary compact" onClick={onBack}>
-          Back
-        </button>
-      </header>
-      <section className="auth card">
-        <div>
-          <p className="eyebrow">COMMUNITY ACCESS</p>
-          <h1>Sign in to CivicLens.</h1>
-          <p className="muted">
-            An account keeps scans and community reports attributable and
-            protected.
-          </p>
-          <label>
-            Email
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              autoComplete="current-password"
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-          <div className="actions">
-            <button className="primary" onClick={() => submit("sign-in")}>
-              Sign in
-            </button>
-            <button className="secondary" onClick={() => submit("sign-up")}>
-              Create account
-            </button>
+    <main className="auth-shell">
+      <section className="auth-visual" aria-label="CivicLens community infrastructure monitoring">
+        <video autoPlay muted loop playsInline preload="auto" aria-hidden="true">
+          <source
+            src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260813_052122_e77a27e6-17f1-4794-889b-3ceaa0e9e8cb.mp4"
+            type="video/mp4"
+          />
+        </video>
+        <div className="auth-scrim" />
+        <div className="auth-promise">
+          <div className="auth-badge">
+            <svg viewBox="0 0 582 557" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                d="M449 0h-14l-20 10-215 239-13 27 2 23 23 27 20 6 57 2v182l12 27 23 13h22l28-20 199-225 9-23-3-24-20-24-20-7-61-3V32l-8-19zM442 38l4 212 20 17 74 3 7 15-206 235-9 2-8-8-3-200-14-14-12-3h-62l-9-6-3-9zM1 67l3 14 13 9h199l7-3 9-13-4-17-13-8H18L5 57zM0 285l4 15 13 8h88l13-9 3-8-2-13-8-8-8-3H17l-13 8zM1 495l3 16 6 6 13 3h156l12-4 9-16-4-12-14-9H18l-9 4z"
+              />
+            </svg>
+            <span>Public projects, clearly tracked</span>
           </div>
-          {message && (
-            <p className="muted" role="status">
-              {message}
+          <p className="auth-headline">
+            <span>See What Your City Builds</span>
+            <span>Clearly</span>
+          </p>
+        </div>
+      </section>
+
+      <section className="auth-pane">
+        <div className="auth-card">
+          <button type="button" className="auth-back" onClick={onBack} aria-label="Back to CivicLens home">
+            <span aria-hidden="true">←</span> CivicLens
+          </button>
+
+          <form className="auth-form" onSubmit={submit}>
+            <div className="auth-intro">
+              <p className="auth-kicker">CIVICLENS COMMUNITY ACCESS</p>
+              <h1>{isRegistration ? "Join CivicLens" : "Welcome back"}</h1>
+              <p>
+                {isRegistration ? (
+                  "Track public works, document local conditions, and help your community demand accountability."
+                ) : (
+                  <><strong>Log in</strong> to review scans, track projects, and manage community reports.</>
+                )}
+              </p>
+            </div>
+
+            <label className="auth-field">
+              <span>Email address</span>
+              <input
+                type="email"
+                autoComplete="email"
+                aria-label="Email address"
+                placeholder="Your email address"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+            <label className="auth-field">
+              <span>Password</span>
+              <input
+                type="password"
+                autoComplete={isRegistration ? "new-password" : "current-password"}
+                aria-label="Password"
+                placeholder={isRegistration ? "Create a password (8+ characters)" : "Your password"}
+                minLength={8}
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+
+            <button className="auth-submit" type="submit" disabled={loading}>
+              <span>
+                {loading
+                  ? isRegistration ? "Creating your account…" : "Checking your access…"
+                  : isRegistration ? "Create CivicLens account" : "Log in to CivicLens"}
+              </span>
+              {!loading && (
+                <svg viewBox="0 0 22 22" aria-hidden="true">
+                  <path d="M3 11h15.4M11 3.3l7.7 7.7-7.7 7.7" />
+                </svg>
+              )}
+            </button>
+
+            {message && <p className="auth-message" role="status">{message}</p>}
+
+            <p className="auth-switch">
+              {isRegistration ? "Already monitoring with CivicLens? " : "New to CivicLens? "}
+              <button
+                type="button"
+                onClick={() => onModeChange(isRegistration ? "sign-in" : "sign-up")}
+              >
+                {isRegistration ? "Log in" : "Create an account"}
+              </button>
             </p>
-          )}
+          </form>
         </div>
       </section>
     </main>
@@ -243,19 +318,23 @@ function AuthForm({ onBack }: { onBack: () => void }) {
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [showAuth, setShowAuth] = useState(
-    () => window.location.pathname === "/login",
-  );
-  const openLogin = () => {
-    window.history.pushState({}, "", "/login");
-    setShowAuth(true);
+  const getAuthMode = () => {
+    if (window.location.pathname === "/register") return "sign-up" as const;
+    if (window.location.pathname === "/login") return "sign-in" as const;
+    return null;
+  };
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up" | null>(getAuthMode);
+  const navigateAuth = (mode: "sign-in" | "sign-up") => {
+    window.history.pushState({}, "", mode === "sign-up" ? "/register" : "/login");
+    setAuthMode(mode);
   };
   const openLanding = () => {
     window.history.pushState({}, "", "/");
-    setShowAuth(false);
+    document.title = "CivicLens";
+    setAuthMode(null);
   };
   useEffect(() => {
-    const onPopState = () => setShowAuth(window.location.pathname === "/login");
+    const onPopState = () => setAuthMode(getAuthMode());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -276,10 +355,10 @@ function App() {
       </main>
     );
   if (!session)
-    return showAuth ? (
-      <AuthForm onBack={openLanding} />
+    return authMode ? (
+      <AuthForm mode={authMode} onBack={openLanding} onModeChange={navigateAuth} />
     ) : (
-      <Landing onSignIn={openLogin} />
+      <Landing onSignIn={() => navigateAuth("sign-in")} />
     );
   return <Dashboard />;
 }
