@@ -10,10 +10,12 @@ import {
   LogOut,
   ArrowRight,
   MousePointer2,
+  Share2,
 } from "lucide-react";
 import {
   createReport,
   listReports,
+  shareReport,
   supabase,
   type ReportItem,
 } from "./supabase";
@@ -508,6 +510,7 @@ function Dashboard() {
   const [reporting, setReporting] = useState<Match>();
   const [note, setNote] = useState("");
   const [reportMessage, setReportMessage] = useState("");
+  const [shareToast, setShareToast] = useState("");
   const preview = useMemo(
     () => (file ? URL.createObjectURL(file) : undefined),
     [file],
@@ -576,6 +579,16 @@ function Dashboard() {
       setReportMessage(
         error instanceof Error ? error.message : "Unable to publish report",
       );
+    }
+  };
+  const handleShare = async (report: ReportItem) => {
+    const result = await shareReport(report);
+    if (result === 'copied') {
+      setShareToast("Link copied to clipboard");
+      setTimeout(() => setShareToast(""), 2500);
+    } else if (result === 'error') {
+      setShareToast("Could not share this report");
+      setTimeout(() => setShareToast(""), 2500);
     }
   };
   return (
@@ -824,6 +837,15 @@ function Dashboard() {
                   Reported by {r.authorName} ·{" "}
                   {new Date(r.createdAt).toLocaleDateString()} · {r.status}
                 </small>
+                <div className="report-footer">
+                  <button
+                    className="secondary compact"
+                    onClick={() => handleShare(r)}
+                    aria-label={`Share report: ${r.category}`}
+                  >
+                    <Share2 /> Share
+                  </button>
+                </div>
               </div>
             </article>
           ))
@@ -833,6 +855,11 @@ function Dashboard() {
         Official records are shown with source attribution. AI helps find
         candidates; it does not verify government facts.
       </footer>
+      {shareToast && (
+        <div className="share-toast" role="status" aria-live="polite">
+          {shareToast}
+        </div>
+      )}
     </main>
   );
 }
