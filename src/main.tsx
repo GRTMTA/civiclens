@@ -18,6 +18,7 @@ import {
   ArrowLeft,
   Maximize2,
   Minimize2,
+  Share2,
 } from "lucide-react";
 import {
   createReport,
@@ -26,6 +27,7 @@ import {
   postComment,
   deleteComment,
   setCommentHidden,
+  shareReport,
   supabase,
   type ReportItem,
   type CommentItem,
@@ -760,6 +762,7 @@ function Dashboard() {
   const [activeThread, setActiveThread] = useState<ReportItem | undefined>();
   const [currentUserId, setCurrentUserId] = useState<string | undefined>();
   const [isModerator, setIsModerator] = useState(false);
+  const [shareToast, setShareToast] = useState("");
   const preview = useMemo(
     () => (file ? URL.createObjectURL(file) : undefined),
     [file],
@@ -847,6 +850,17 @@ function Dashboard() {
         error instanceof Error ? error.message : "Unable to publish report",
       );
     }
+  };
+  const handleShare = async (report: ReportItem) => {
+    const result = await shareReport(report);
+    if (result === 'copied') {
+      setShareToast("Link copied to clipboard");
+      setTimeout(() => setShareToast(""), 2500);
+    } else if (result === 'error') {
+      setShareToast("Could not share this report");
+      setTimeout(() => setShareToast(""), 2500);
+    }
+    // 'shared' — native sheet handled it, no toast needed
   };
   return (
     <div className={`app-layout${activeThread ? " app-layout--panel" : ""}`}>
@@ -1103,6 +1117,13 @@ function Dashboard() {
                   >
                     <MessageCircle /> Discuss
                   </button>
+                  <button
+                    className="secondary compact"
+                    onClick={() => handleShare(r)}
+                    aria-label={`Share report: ${r.category}`}
+                  >
+                    <Share2 /> Share
+                  </button>
                 </div>
               </div>
             </article>
@@ -1121,6 +1142,11 @@ function Dashboard() {
           isModerator={isModerator}
           onClose={() => setActiveThread(undefined)}
         />
+      )}
+      {shareToast && (
+        <div className="share-toast" role="status" aria-live="polite">
+          {shareToast}
+        </div>
       )}
     </div>
   );

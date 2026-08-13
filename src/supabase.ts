@@ -37,7 +37,47 @@ export async function listReports():Promise<ReportItem[]> {
   }));
 }
 
-// ── Comment threads ──────────────────────────────────────────────────────────
+// ── Share links ───────────────────────────────────────────────────────────────
+
+/**
+ * Returns the canonical shareable URL for a report.
+ * Points to the Edge Function which serves crawler-readable OG meta tags
+ * and redirects human visitors to the SPA.
+ */
+export function getReportShareUrl(reportId: string): string {
+  return `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/report-preview?id=${encodeURIComponent(reportId)}`;
+}
+
+/**
+ * Share a report using the Web Share API when available,
+ * falling back to copying the URL to the clipboard.
+ * Returns 'shared' | 'copied' | 'error'.
+ */
+export async function shareReport(report: ReportItem): Promise<'shared' | 'copied' | 'error'> {
+  const url = getReportShareUrl(report.id);
+  const title = `${report.category} anomaly — CivicLens`;
+  const text = `${report.note.slice(0, 120)}${report.note.length > 120 ? '…' : ''}`;
+
+  if (typeof navigator !== 'undefined' && navigator.share) {
+    try {
+      await navigator.share({ title, text, url });
+      return 'shared';
+    } catch (e) {
+      // User cancelled (AbortError) — not an error worth reporting
+      if (e instanceof DOMException && e.name === 'AbortError') return 'error';
+    }
+  }
+
+  // Clipboard fallback
+  try {
+    await navigator.clipboard.writeText(url);
+    return 'copied';
+  } catch {
+    return 'error';
+  }
+}
+
+// ── Comment threads ───────────────────────────────────────────────────────────
 
 export type CommentItem = {
   id: string;
