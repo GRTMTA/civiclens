@@ -2,7 +2,7 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import type {Session} from '@supabase/supabase-js';
 import {Camera,MapPin,ShieldCheck,AlertTriangle,RefreshCw,LogOut} from 'lucide-react';
-import {createReport,listReports,supabase,type ReportItem} from '../apps/web/src/supabase';
+import {createReport,listReports,supabase,type ReportItem} from './supabase';
 import './styles.css';
 
 type Match={project:{id:string;name:string;category:string;description:string;agency:string;contractor?:string;budget?:number;status:string;progress?:number;location:string;sourceUrl:string;lastChecked:string};confidence:number;evidence:string[]};
