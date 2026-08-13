@@ -17,8 +17,8 @@ import {
   supabase,
   type ReportItem,
 } from "./supabase";
-import pristine from "./assests/city-pristine.jpg";
-import damaged from "./assests/city-damaged.jpg";
+import pristine from "./assests/city-pristine.png";
+import damaged from "./assests/city-damaged.png";
 import "./styles.css";
 import "./auth.css";
 
