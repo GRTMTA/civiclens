@@ -14,7 +14,7 @@ Without `GROQ_API_KEY`, scans use a safe demo analysis. The local seed includes 
 
 ## Architecture
 
-- `apps/web`: React and Vite client using Supabase Auth, database, Storage, and Functions
+- `src`: React and Vite client using Supabase Auth, database, Storage, and Functions
 - `supabase/migrations`: PostGIS schema, profile provisioning, RLS policies, and database functions
 - `supabase/functions/scan-project`: authenticated Groq image analysis and project matching
 - `supabase/seed.sql`: local demonstration data

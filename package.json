@@ -1,10 +1,25 @@
 {
   "name": "civiclens",
+  "version": "0.1.0",
   "private": true,
-  "workspaces": ["apps/*"],
+  "type": "module",
   "scripts": {
-    "dev": "npm run dev --prefix apps/web",
-    "build": "npm run build --prefix apps/web",
-    "test": "npm run test --prefix apps/web -- --passWithNoTests"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.55.0",
+    "lucide-react": "0.468.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "5.7.3",
+    "vite": "6.0.5",
+    "vitest": "2.1.8"
   }
 }
