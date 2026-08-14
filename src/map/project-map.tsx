@@ -170,7 +170,13 @@ function MapStatePanel({
   )
 }
 
-function MapNotice({ children }: { children: React.ReactNode }) {
+function MapNotice({
+  children,
+  action,
+}: {
+  children: React.ReactNode
+  action?: React.ReactNode
+}) {
   return (
     <div
       className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-amber-300 bg-amber-50/95 px-3 py-1.5 text-xs font-medium text-amber-950 shadow-sm backdrop-blur-sm"
@@ -179,6 +185,7 @@ function MapNotice({ children }: { children: React.ReactNode }) {
     >
       <Info className="size-3.5" aria-hidden="true" />
       {children}
+      {action}
     </div>
   )
 }
@@ -840,19 +847,23 @@ export function ProjectMapSurface() {
               }
             />
           )}
-          {queryError?.kind === "viewport" && (
-            <MapNotice>{queryError.title}</MapNotice>
-          )}
-          {queryError && queryError.kind !== "viewport" && (
-            <MapStatePanel
-              title={queryError.title}
-              description={queryError.description}
+          {queryError && (
+            <MapNotice
               action={
-                <Button variant="outline" size="sm" onClick={() => void loadViewport(lastBoundsRef.current)}>
-                  <RefreshCw aria-hidden="true" /> Retry project data
-                </Button>
+                queryError.kind !== "viewport" ? (
+                  <Button
+                    className="pointer-events-auto h-6 px-2 text-[11px]"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void loadViewport(lastBoundsRef.current)}
+                  >
+                    Retry
+                  </Button>
+                ) : undefined
               }
-            />
+            >
+              {queryError.title}
+            </MapNotice>
           )}
           {!queryError && response.features.length === 0 && queryState === "ready" && !mapUnavailable && (
             <MapStatePanel
