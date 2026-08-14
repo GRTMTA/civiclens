@@ -63,9 +63,17 @@ type Project = {
   sourceUrl: string;
   lastChecked: string;
 };
-type Match = { project: Project; confidence: number; evidence: string[] };
+type Citation = {
+  title: string;
+  publisher: string;
+  url: string | null;
+  accessDate: string;
+  trusted: boolean;
+};
+type Match = { project: Project; confidence: number; evidence: string[]; citations: Citation[] };
 type ScanResult = {
   status: string;
+  isDemo?: boolean;
   analysis?: unknown;
   matches?: Match[];
   error?: string;
@@ -937,6 +945,15 @@ function Dashboard() {
                 ? "We need a clearer photo"
                 : "Possible official projects"}
           </h2>
+          {result.isDemo && (
+            <div className="demo-banner" role="note">
+              <AlertTriangle />
+              <span>
+                <strong>Demo mode</strong> — no AI key configured. Results below
+                are placeholder data, not real government records.
+              </span>
+            </div>
+          )}
           {result.error ? (
             <div className="notice">
               <AlertTriangle />
@@ -1002,14 +1019,65 @@ function Dashboard() {
                       <dd>{m.project.sourceOfFunds || "Not reported"}</dd>
                     </div>
                   </dl>
-                  <p className="evidence">{m.evidence.join(" · ")}</p>
-                  <a
-                    href={m.project.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    View official DPWH record ↗
-                  </a>
+
+                  {/* ── AI visual inference — separated from official facts ── */}
+                  <div className="inference-block">
+                    <p className="inference-label">
+                      AI visual inference
+                      {result.isDemo && (
+                        <span className="unverified-badge">demo</span>
+                      )}
+                    </p>
+                    <ul className="evidence-list">
+                      {m.evidence.map((e, i) => (
+                        <li key={i}>{e}</li>
+                      ))}
+                    </ul>
+                    <p className="inference-disclaimer">
+                      AI suggests candidates from visual clues only. It does not
+                      verify government facts or claim project identity.
+                    </p>
+                  </div>
+
+                  {/* ── Structured citations grounded in database records ── */}
+                  <div className="citations-block">
+                    <p className="citations-label">Sources</p>
+                    <ol className="citations-list">
+                      {(m.citations ?? []).map((c, i) => (
+                        <li key={i} className="citation-item">
+                          {c.url ? (
+                            <a
+                              href={c.url}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className={c.trusted ? "citation-link" : "citation-link citation-link--untrusted"}
+                            >
+                              {c.title}
+                            </a>
+                          ) : (
+                            <span className="citation-title">{c.title}</span>
+                          )}
+                          <span className="citation-meta">
+                            {c.publisher}
+                            {!c.trusted && c.url && (
+                              <span className="unverified-badge">unverified source</span>
+                            )}
+                            {" · "}Accessed {c.accessDate}
+                          </span>
+                          {!c.url && (
+                            <span className="unverified-badge">no source URL</span>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                    <p className="citations-note">
+                      BetterGov.PH snapshot{" "}
+                      {m.project.sourceRevision?.slice(0, 8) || "unknown"} ·
+                      imported{" "}
+                      {shortDate(m.project.sourceImportedAt) || "date unavailable"}
+                    </p>
+                  </div>
+
                   {m.project.livestreamUrl && (
                     <a
                       href={m.project.livestreamUrl}
@@ -1019,15 +1087,6 @@ function Dashboard() {
                       View livestream ↗
                     </a>
                   )}
-                  <small className="source-note">
-                    BetterGov.PH snapshot{" "}
-                    {m.project.sourceRevision?.slice(0, 8) || "unknown"} ·
-                    imported{" "}
-                    {shortDate(m.project.sourceImportedAt) ||
-                      "date unavailable"}
-                    . AI suggests candidates; source records remain
-                    authoritative.
-                  </small>
                   <button
                     className="secondary compact"
                     onClick={() => setReporting(m)}
