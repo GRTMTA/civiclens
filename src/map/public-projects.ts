@@ -27,6 +27,43 @@ export function isMapConfigurationError(
   return error instanceof MapConfigurationError
 }
 
+export type ProjectDataErrorCopy = {
+  kind: "configuration" | "migration" | "query"
+  title: string
+  description: string
+}
+
+export function getProjectDataErrorCopy(error: unknown): ProjectDataErrorCopy {
+  if (isMapConfigurationError(error)) {
+    return {
+      kind: "configuration",
+      title: "Project data configuration required",
+      description:
+        "Set the public Supabase configuration to load official project records.",
+    }
+  }
+
+  const message = error instanceof Error ? error.message : String(error ?? "")
+  const normalized = message.toLowerCase()
+  if (
+    normalized.includes("projects_in_view") &&
+    (normalized.includes("schema cache") || normalized.includes("could not find the function"))
+  ) {
+    return {
+      kind: "migration",
+      title: "Map data migration required",
+      description:
+        "The connected Supabase project is missing the public project-map function. Apply the map migration, then retry.",
+    }
+  }
+
+  return {
+    kind: "query",
+    title: "Project data unavailable",
+    description: "Official project records could not be loaded. Retry when the data service is available.",
+  }
+}
+
 export function getMapStyleUrl(): string | null {
   const value = import.meta.env.VITE_MAP_STYLE_URL?.trim()
   return value || null

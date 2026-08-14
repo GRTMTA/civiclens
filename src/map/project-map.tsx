@@ -13,11 +13,9 @@ import {
   CheckCircle2,
   CircleHelp,
   Info,
-  LocateFixed,
   MapPinned,
   RefreshCw,
   Search,
-  X,
 } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -37,8 +35,9 @@ import {
   fetchProjectDetail,
   fetchViewportProjects,
   getMapStyleUrl,
-  isMapConfigurationError,
+  getProjectDataErrorCopy,
   type PublicRpcClient,
+  type ProjectDataErrorCopy,
 } from "./public-projects"
 import {
   normalizeOfficialStatus,
@@ -217,7 +216,7 @@ function ProjectList({
       {queryError && (
         <Alert variant="destructive" className="m-3">
           <AlertCircle aria-hidden="true" />
-          <AlertTitle>Project query unavailable</AlertTitle>
+          <AlertTitle>Project data unavailable</AlertTitle>
           <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
             <span>{queryError}</span>
             <Button size="sm" variant="outline" onClick={onRetry}>
@@ -456,7 +455,6 @@ function ProjectDetailPanel({
   error,
   onRetry,
   onClose,
-  mobile = false,
 }: {
   selectedId: string | null
   feature: ViewportFeature | null
@@ -465,50 +463,25 @@ function ProjectDetailPanel({
   error: string | null
   onRetry: () => void
   onClose: () => void
-  mobile?: boolean
 }) {
-  if (mobile) {
-    return (
-      <Sheet open={Boolean(selectedId)} onOpenChange={(open) => !open && onClose()}>
-        <SheetContent side="bottom" className="max-h-[85dvh] rounded-t-2xl p-0">
-          <SheetHeader className="border-b pr-14">
-            <SheetTitle>Official project record</SheetTitle>
-            <SheetDescription>
-              Source-attributed details for the selected project.
-            </SheetDescription>
-          </SheetHeader>
-          <ProjectDetailContent
-            feature={feature}
-            detail={detail}
-            loading={loading}
-            error={error}
-            onRetry={onRetry}
-          />
-        </SheetContent>
-      </Sheet>
-    )
-  }
-
-  if (!selectedId) return null
   return (
-    <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card" aria-label="Selected official project">
-      <div className="flex items-center justify-between border-b p-4">
-        <div>
-          <h2 className="font-heading text-base font-semibold">Project details</h2>
-          <p className="text-xs text-muted-foreground">Official-source record</p>
-        </div>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close project details">
-          <X aria-hidden="true" />
-        </Button>
-      </div>
-      <ProjectDetailContent
-        feature={feature}
-        detail={detail}
-        loading={loading}
-        error={error}
-        onRetry={onRetry}
-      />
-    </section>
+    <Sheet open={Boolean(selectedId)} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-md">
+        <SheetHeader className="border-b pr-14">
+          <SheetTitle>Official project record</SheetTitle>
+          <SheetDescription>
+            Source-attributed details for the selected project.
+          </SheetDescription>
+        </SheetHeader>
+        <ProjectDetailContent
+          feature={feature}
+          detail={detail}
+          loading={loading}
+          error={error}
+          onRetry={onRetry}
+        />
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -679,12 +652,11 @@ export function ProjectMapSurface() {
   const [queryState, setQueryState] = useState<
     "loading" | "refreshing" | "ready" | "configuration"
   >("loading")
-  const [queryError, setQueryError] = useState<string | null>(null)
+  const [queryError, setQueryError] = useState<ProjectDataErrorCopy | null>(null)
   const [styleFailure, setStyleFailure] = useState(false)
   const [detail, setDetail] = useState<ProjectDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
-  const [listOpen, setListOpen] = useState(false)
   const mapRef = useRef<MapRef | null>(null)
   const clientRef = useRef<PublicRpcClient | null>(null)
   const requestRef = useRef(0)
@@ -708,13 +680,9 @@ export function ProjectMapSurface() {
       setQueryState("ready")
     } catch (error) {
       if (requestId !== requestRef.current) return
-      if (isMapConfigurationError(error)) {
-        setQueryState("configuration")
-        setQueryError(null)
-        return
-      }
-      setQueryState(hasResponseRef.current ? "ready" : "loading")
-      setQueryError(error instanceof Error ? error.message : "Unable to load projects.")
+      const errorCopy = getProjectDataErrorCopy(error)
+      setQueryState(errorCopy.kind === "configuration" ? "configuration" : "ready")
+      setQueryError(errorCopy)
     }
   }, [])
 
@@ -784,7 +752,6 @@ export function ProjectMapSurface() {
   const selectProject = useCallback((feature: ViewportFeature) => {
     setSelectedId(feature.id)
     setSelectedFeature(feature)
-    setListOpen(false)
     const search = writeProjectSearch(window.location.search, feature.id)
     window.history.pushState({ projectId: feature.id }, "", `${window.location.pathname}?${search}`)
     mapRef.current?.flyTo({ center: feature.coordinates, zoom: Math.max(camera.zoom, 13) })
@@ -816,33 +783,9 @@ export function ProjectMapSurface() {
   const mapUnavailable = mapStyleMissing || styleFailure
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            Source records
-          </p>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">
-            Infrastructure projects
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Browse source-attributed infrastructure records by documented project location.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
-          {queryState === "refreshing" && <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />}
-          {queryState === "loading"
-            ? "Loading visible projects…"
-            : queryState === "refreshing"
-              ? "Updating this area…"
-              : queryState === "configuration"
-                ? "Project data configuration required"
-                : "Map area ready"}
-        </div>
-      </div>
-
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,25rem)]">
-        <section className="relative min-h-[34rem] overflow-hidden rounded-xl border bg-muted/30 lg:min-h-0" aria-label="Official project map">
+    <div className="flex min-h-0 flex-1 flex-col p-3 md:p-4">
+      <div className="relative min-h-0 flex-1">
+        <section className="relative h-full min-h-[34rem] overflow-hidden rounded-xl border bg-muted/30" aria-label="Official project map">
           {styleUrl && !styleFailure ? (
             <OfficialProjectMap
               styleUrl={styleUrl}
@@ -861,7 +804,7 @@ export function ProjectMapSurface() {
               title={mapStyleMissing ? "Map style configuration required" : "Map style unavailable"}
               description={
                 mapStyleMissing
-                  ? "Set VITE_MAP_STYLE_URL to display the geographic map. The official project list remains available."
+                  ? "Set VITE_MAP_STYLE_URL to display the geographic map."
                   : "The configured map style could not be loaded. Retry against the same configured provider."
               }
               action={
@@ -873,7 +816,18 @@ export function ProjectMapSurface() {
               }
             />
           )}
-          {response.features.length === 0 && !queryError && queryState === "ready" && !mapUnavailable && (
+          {queryError && (
+            <MapStatePanel
+              title={queryError.title}
+              description={queryError.description}
+              action={
+                <Button variant="outline" size="sm" onClick={() => void loadViewport(lastBoundsRef.current)}>
+                  <RefreshCw aria-hidden="true" /> Retry project data
+                </Button>
+              }
+            />
+          )}
+          {!queryError && response.features.length === 0 && queryState === "ready" && !mapUnavailable && (
             <MapStatePanel
               title="No official projects in this view"
               description="Pan or zoom the map to browse another area."
@@ -897,61 +851,8 @@ export function ProjectMapSurface() {
           </div>
         </section>
 
-        <aside className="hidden min-h-0 flex-col gap-3 lg:flex">
-          <ProjectList
-            features={response.features}
-            selectedId={selectedId}
-            loading={queryState === "loading" || queryState === "refreshing"}
-            truncated={response.truncated}
-            onSelect={selectProject}
-            onRetry={() => void loadViewport(lastBoundsRef.current)}
-            queryError={queryError}
-            configurationRequired={queryState === "configuration"}
-          />
-          <ProjectDetailPanel
-            selectedId={selectedId}
-            feature={selectedFeature}
-            detail={detail}
-            loading={detailLoading}
-            error={detailError}
-            onRetry={() => void loadDetails()}
-            onClose={closeProject}
-          />
-        </aside>
       </div>
 
-      <div className="flex items-center justify-between gap-2 lg:hidden">
-        <Button variant="outline" onClick={() => setListOpen(true)}>
-          <Search aria-hidden="true" /> Projects in this view
-          <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs">{response.features.length}</span>
-        </Button>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <LocateFixed aria-hidden="true" /> Cebu City view
-        </div>
-      </div>
-
-      <Sheet open={listOpen} onOpenChange={setListOpen}>
-        <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-2xl p-0">
-          <SheetHeader className="border-b">
-            <SheetTitle>Projects in this view</SheetTitle>
-            <SheetDescription>
-              Select an official record from the current map area.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex min-h-0 h-[55dvh] p-3">
-            <ProjectList
-              features={response.features}
-              selectedId={selectedId}
-            loading={queryState === "loading" || queryState === "refreshing"}
-              truncated={response.truncated}
-              onSelect={selectProject}
-            onRetry={() => void loadViewport(lastBoundsRef.current)}
-            queryError={queryError}
-            configurationRequired={queryState === "configuration"}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
       <ProjectDetailPanel
         selectedId={selectedId}
         feature={selectedFeature}
@@ -960,7 +861,6 @@ export function ProjectMapSurface() {
         error={detailError}
         onRetry={() => void loadDetails()}
         onClose={closeProject}
-        mobile
       />
     </div>
   )

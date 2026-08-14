@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   fetchProjectDetail,
   fetchViewportProjects,
+  getProjectDataErrorCopy,
   isMapConfigurationError,
   MapConfigurationError,
 } from "./public-projects"
@@ -49,6 +50,21 @@ describe("public project data seam", () => {
 
     expect(isMapConfigurationError(configurationError)).toBe(true)
     expect(isMapConfigurationError(new Error("query failed"))).toBe(false)
+  })
+
+  it("turns a missing viewport RPC into an actionable migration state", () => {
+    const copy = getProjectDataErrorCopy(
+      new Error(
+        "Could not find the function public.projects_in_view(p_east, p_north, p_south, p_west) in the schema cache",
+      ),
+    )
+
+    expect(copy).toEqual({
+      kind: "migration",
+      title: "Map data migration required",
+      description:
+        "The connected Supabase project is missing the public project-map function. Apply the map migration, then retry.",
+    })
   })
 
   it("surfaces public viewport and detail query failures to the caller", async () => {
