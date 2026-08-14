@@ -99,8 +99,8 @@ describe("public project data seam", () => {
       ),
     ).toEqual({
       kind: "query",
-      title: "Project query timed out",
-      description: "The official project query took too long. Zoom in and retry.",
+      title: "Project data unavailable",
+      description: "We couldn't refresh projects in this area. Retry when you're ready.",
     })
 
     expect(

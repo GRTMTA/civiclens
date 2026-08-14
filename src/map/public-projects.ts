@@ -94,17 +94,15 @@ export function getProjectDataErrorCopy(error: unknown): ProjectDataErrorCopy {
   if (code === "57014" || normalized.includes("statement timeout")) {
     return {
       kind: "query",
-      title: "Project query timed out",
-      description: "The official project query took too long. Zoom in and retry.",
+      title: "Project data unavailable",
+      description: "We couldn't refresh projects in this area. Retry when you're ready.",
     }
   }
 
   return {
     kind: "query",
-    title: "Official project query failed",
-    description: code
-      ? `Supabase returned contract error ${code}. Retry; if it persists, check the public project-map RPC.`
-      : "The official project query contract failed. Retry; if it persists, check the public project-map RPC.",
+    title: "Project data unavailable",
+    description: "We couldn't refresh projects in this area. Retry when you're ready.",
   }
 }
 

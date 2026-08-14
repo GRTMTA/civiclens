@@ -9,7 +9,7 @@ import { ProjectMapSurface } from "./map/project-map"
 export function Dashboard01Page() {
   return (
     <TooltipProvider>
-      <Toaster position="top-right" />
+      <Toaster />
       <SidebarProvider
         style={
           {

@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   CircleHelp,
   Info,
+  LoaderCircle,
   MapPinned,
   RefreshCw,
   Search,
@@ -31,6 +32,7 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
+import { cn } from "@/lib/utils"
 import {
   createPublicRpcClient,
   fetchProjectDetail,
@@ -160,7 +162,11 @@ function MapStatePanel({
   action?: React.ReactNode
 }) {
   return (
-    <div className="absolute inset-3 z-10 flex items-center justify-center rounded-xl border border-dashed bg-background/95 p-6 text-center shadow-sm backdrop-blur-sm">
+    <div
+      className="absolute inset-3 z-10 flex items-center justify-center rounded-xl border border-dashed bg-background/95 p-6 text-center shadow-sm backdrop-blur-sm"
+      role="alert"
+      aria-live="assertive"
+    >
       <div className="max-w-sm space-y-2">
         <MapPinned className="mx-auto size-8 text-muted-foreground" aria-hidden="true" />
         <h2 className="font-heading text-base font-semibold">{title}</h2>
@@ -171,38 +177,69 @@ function MapStatePanel({
   )
 }
 
-function MapNotice({ children }: { children: React.ReactNode }) {
+type MapStatusNoticeVariant = "empty" | "info" | "limited" | "loading"
+
+function MapStatusNotice({
+  variant,
+  title,
+  description,
+  action,
+}: {
+  variant: MapStatusNoticeVariant
+  title: string
+  description?: string
+  action?: React.ReactNode
+}) {
+  const isEmpty = variant === "empty"
+  const hasAction = Boolean(action)
+
   return (
     <div
-      className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-amber-300 bg-amber-50/95 px-3 py-1.5 text-xs font-medium text-amber-950 shadow-sm backdrop-blur-sm"
+      className={cn(
+        "absolute left-1/2 z-10 -translate-x-1/2 border border-border bg-background/95 text-foreground shadow-sm backdrop-blur-sm",
+        isEmpty
+          ? "top-4 w-[min(calc(100%-2rem),24rem)] rounded-lg p-3 shadow-md"
+          : "top-3 max-w-[min(30rem,calc(100%-2rem))] rounded-lg px-3 py-2",
+        hasAction ? "pointer-events-auto" : "pointer-events-none",
+        variant === "limited" && "border-amber-300/80",
+      )}
       role="status"
       aria-live="polite"
     >
-      <Info className="size-3.5" aria-hidden="true" />
-      {children}
+      <div className={cn("flex gap-2", isEmpty ? "items-center justify-between" : "items-start")}>
+        <div className="flex min-w-0 items-start gap-2">
+          {variant === "loading" ? (
+            <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+          ) : variant !== "empty" ? (
+            <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          ) : null}
+          <div className="min-w-0 space-y-0.5">
+            <p className={cn(isEmpty ? "text-sm font-semibold" : "text-xs font-medium")}>{title}</p>
+            {description && (
+              <p className={cn("text-xs text-muted-foreground", !isEmpty && "leading-5")}>
+                {description}
+              </p>
+            )}
+          </div>
+        </div>
+        {action}
+      </div>
     </div>
   )
 }
 
 function MapEmptyNotice({ onReset }: { onReset: () => void }) {
   return (
-    <div
-      className="absolute left-1/2 top-4 z-10 w-[min(calc(100%-2rem),24rem)] -translate-x-1/2 rounded-lg border border-border bg-background/95 p-3 text-foreground shadow-md backdrop-blur-sm"
-      role="status"
-      aria-live="polite"
-    >
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0 space-y-0.5">
-          <p className="text-sm font-semibold">No projects in this area</p>
-          <p className="text-xs text-muted-foreground">
-            Move around the map or zoom out to discover nearby projects.
-          </p>
-        </div>
+    <MapStatusNotice
+      variant="empty"
+      title="No projects in this area"
+      description="Move around the map or zoom out to discover nearby projects."
+      action={
         <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={onReset}>
           Reset view
         </Button>
-      </div>
-    </div>
+      }
+    />
   )
 }
 
@@ -210,23 +247,15 @@ function ProjectList({
   features,
   selectedId,
   loading,
-  truncated,
   onSelect,
-  onRetry,
-  queryError,
-  configurationRequired,
 }: {
   features: ViewportFeature[]
   selectedId: string | null
   loading: boolean
-  truncated: boolean
   onSelect: (feature: ViewportFeature) => void
-  onRetry: () => void
-  queryError: string | null
-  configurationRequired: boolean
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card">
+    <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card" aria-busy={loading}>
       <div className="flex items-start justify-between gap-3 border-b p-4">
         <div>
           <h2 className="font-heading text-base font-semibold">
@@ -236,42 +265,11 @@ function ProjectList({
             Official records at documented project locations
           </p>
         </div>
-        <Badge variant="secondary" aria-label={`${features.length} projects returned`}>
+        <Badge variant="secondary" aria-label={`${features.length} projects in this view`}>
           {features.length}
         </Badge>
       </div>
-      {truncated && (
-        <Alert className="m-3 border-amber-300 bg-amber-50 text-amber-950">
-          <Info aria-hidden="true" />
-          <AlertTitle>Results are incomplete</AlertTitle>
-          <AlertDescription>
-            Zoom in to see more projects. Cluster counts represent returned
-            records, not every project in this area.
-          </AlertDescription>
-        </Alert>
-      )}
-      {queryError && (
-        <Alert variant="destructive" className="m-3">
-          <AlertCircle aria-hidden="true" />
-          <AlertTitle>Project data unavailable</AlertTitle>
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-            <span>{queryError}</span>
-            <Button size="sm" variant="outline" onClick={onRetry}>
-              <RefreshCw aria-hidden="true" /> Retry
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
-      {configurationRequired && (
-        <Alert className="m-3 border-amber-300 bg-amber-50 text-amber-950">
-          <Info aria-hidden="true" />
-          <AlertTitle>Project data configuration required</AlertTitle>
-          <AlertDescription>
-            Configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to load project records.
-          </AlertDescription>
-        </Alert>
-      )}
-      <div className="min-h-0 flex-1 overflow-y-auto p-2" aria-live="polite">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {loading && features.length === 0 && (
           <div className="space-y-2 p-2" aria-label="Loading projects">
             {Array.from({ length: 5 }).map((_, index) => (
@@ -279,7 +277,7 @@ function ProjectList({
             ))}
           </div>
         )}
-        {!loading && !queryError && !configurationRequired && features.length === 0 && (
+        {!loading && features.length === 0 && (
           <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 p-5 text-center">
             <Search className="size-7 text-muted-foreground" aria-hidden="true" />
             <p className="font-medium">No projects in this area</p>
@@ -293,9 +291,9 @@ function ProjectList({
             <li key={feature.id}>
               <button
                 type="button"
-                className="w-full rounded-lg border border-transparent p-3 text-left transition hover:border-border hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-lg border border-transparent p-3 text-left transition hover:border-border hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring data-[selected=true]:border-primary/40 data-[selected=true]:bg-primary/5"
                 data-selected={selectedId === feature.id}
-                aria-current={selectedId === feature.id ? "true" : undefined}
+                aria-pressed={selectedId === feature.id}
                 onClick={() => onSelect(feature)}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -307,15 +305,17 @@ function ProjectList({
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="capitalize">{feature.category}</span>
                   <span aria-hidden="true">·</span>
-                  <span>{feature.id}</span>
+                  <span className="font-mono text-[11px]">{feature.id}</span>
                 </div>
               </button>
             </li>
           ))}
         </ul>
       </div>
-      <div className="border-t p-3 text-xs text-muted-foreground">
-        {loading && features.length > 0 ? "Updating this area…" : `${features.length} returned`}
+      <div className="border-t p-3 text-xs text-muted-foreground" role="status" aria-live="polite">
+        {loading && features.length > 0
+          ? "Updating projects in this area…"
+          : `${features.length} ${features.length === 1 ? "project" : "projects"} in this view`}
       </div>
     </div>
   )
@@ -415,7 +415,9 @@ function ProjectDetailContent({
           </div>
           <div className="flex justify-between gap-4 border-b pb-2">
             <dt className="text-muted-foreground">Contract ID</dt>
-            <dd className="text-right">{detail.contractId ?? "Not provided"}</dd>
+            <dd className="max-w-[12rem] break-all text-right font-mono text-xs">
+              {detail.contractId ?? "Not provided"}
+            </dd>
           </div>
           <div className="flex justify-between gap-4 border-b pb-2">
             <dt className="text-muted-foreground">Start date</dt>
@@ -728,7 +730,7 @@ export function ProjectMapSurface() {
   }, [loadViewport, styleUrl])
 
   useEffect(() => {
-    if (queryError?.kind !== "query") return
+    if (queryError?.kind !== "query" || response.features.length === 0) return
     toast.error(queryError.title, {
       id: "project-data-query",
       description: queryError.description,
@@ -738,16 +740,7 @@ export function ProjectMapSurface() {
         onClick: () => void loadViewport(lastBoundsRef.current),
       },
     })
-  }, [loadViewport, queryError])
-
-  useEffect(() => {
-    if (!response.truncated) return
-    toast.warning("More projects are available", {
-      id: "project-results-truncated",
-      description: "Zoom in for a more complete set of official project records.",
-      duration: 7000,
-    })
-  }, [response.truncated])
+  }, [loadViewport, queryError, response.features.length])
 
   useEffect(
     () => () => {
@@ -776,7 +769,8 @@ export function ProjectMapSurface() {
       setDetail(nextDetail)
     } catch (error) {
       if (requestId !== detailRequestRef.current) return
-      setDetailError(error instanceof Error ? error.message : "Unable to load project details.")
+      console.error("CivicLens project detail query failed", error)
+      setDetailError("We couldn't load this project's official details. Retry when you're ready.")
     } finally {
       if (requestId === detailRequestRef.current) setDetailLoading(false)
     }
@@ -896,10 +890,14 @@ export function ProjectMapSurface() {
               }
             />
           )}
-          {queryError?.kind === "viewport" && (
-            <MapNotice>{queryError.title}</MapNotice>
+          {queryError?.kind === "viewport" && !mapUnavailable && (
+            <MapStatusNotice
+              variant="info"
+              title={queryError.title}
+              description={queryError.description}
+            />
           )}
-          {queryError && (queryError.kind === "configuration" || queryError.kind === "migration") && (
+          {queryError && (queryError.kind === "configuration" || queryError.kind === "migration") && !mapUnavailable && (
             <MapStatePanel
               title={queryError.title}
               description={queryError.description}
@@ -910,6 +908,30 @@ export function ProjectMapSurface() {
                   </Button>
                 ) : undefined
               }
+            />
+          )}
+          {queryError?.kind === "query" && response.features.length === 0 && !mapUnavailable && (
+            <MapStatePanel
+              title={queryError.title}
+              description={queryError.description}
+              action={
+                <Button variant="outline" size="sm" onClick={() => void loadViewport(lastBoundsRef.current)}>
+                  <RefreshCw aria-hidden="true" /> Retry project data
+                </Button>
+              }
+            />
+          )}
+          {!queryError && queryState === "loading" && !mapUnavailable && (
+            <MapStatusNotice variant="loading" title="Loading official projects" />
+          )}
+          {!queryError && queryState === "refreshing" && !mapUnavailable && (
+            <MapStatusNotice variant="loading" title="Updating projects in this area" />
+          )}
+          {!queryError && queryState === "ready" && response.truncated && !mapUnavailable && (
+            <MapStatusNotice
+              variant="limited"
+              title="More projects may be available"
+              description="Zoom in to see a more complete set of official project records."
             />
           )}
           {!queryError && response.features.length === 0 && queryState === "ready" && !mapUnavailable && (
