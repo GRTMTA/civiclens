@@ -55,16 +55,16 @@ import {
 } from "./map-contract"
 
 const DEFAULT_CAMERA: CameraState = {
-  latitude: 10.3157,
-  longitude: 123.8854,
-  zoom: 11.2,
+  latitude: 12.8797,
+  longitude: 121.774,
+  zoom: 7,
 }
 
 const DEFAULT_BOUNDS: ViewportBounds = {
-  south: 10.08,
-  west: 123.68,
-  north: 10.55,
-  east: 124.15,
+  south: 7,
+  west: 117,
+  north: 17,
+  east: 127,
 }
 
 const STATUS_LABELS: Record<DisplayStatus, string> = {
@@ -166,6 +166,19 @@ function MapStatePanel({
         <p className="text-sm text-muted-foreground">{description}</p>
         {action}
       </div>
+    </div>
+  )
+}
+
+function MapNotice({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-amber-300 bg-amber-50/95 px-3 py-1.5 text-xs font-medium text-amber-950 shadow-sm backdrop-blur-sm"
+      role="status"
+      aria-live="polite"
+    >
+      <Info className="size-3.5" aria-hidden="true" />
+      {children}
     </div>
   )
 }
@@ -773,7 +786,7 @@ export function ProjectMapSurface() {
       if (!isQueryableViewportBounds(bounds)) {
         setQueryState("ready")
         setQueryError({
-          kind: "query",
+          kind: "viewport",
           title: "Zoom in to load projects",
           description: "The selected map area is too large. Zoom in to request official records.",
         })
@@ -827,7 +840,10 @@ export function ProjectMapSurface() {
               }
             />
           )}
-          {queryError && (
+          {queryError?.kind === "viewport" && (
+            <MapNotice>{queryError.title}</MapNotice>
+          )}
+          {queryError && queryError.kind !== "viewport" && (
             <MapStatePanel
               title={queryError.title}
               description={queryError.description}

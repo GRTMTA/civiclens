@@ -42,7 +42,7 @@ export function isInvalidViewportError(
 }
 
 export type ProjectDataErrorCopy = {
-  kind: "configuration" | "migration" | "query"
+  kind: "configuration" | "migration" | "query" | "viewport"
   title: string
   description: string
 }
@@ -59,7 +59,7 @@ export function getProjectDataErrorCopy(error: unknown): ProjectDataErrorCopy {
 
   if (isInvalidViewportError(error)) {
     return {
-      kind: "query",
+      kind: "viewport",
       title: "Zoom in to load projects",
       description: "The selected map area is too large. Zoom in to request official records.",
     }
