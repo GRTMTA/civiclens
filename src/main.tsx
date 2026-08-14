@@ -10,12 +10,27 @@ import {
   LogOut,
   ArrowRight,
   MousePointer2,
+  MessageCircle,
+  Trash2,
+  EyeOff,
+  Eye,
+  Send,
+  ArrowLeft,
+  Maximize2,
+  Minimize2,
+  Share2,
 } from "lucide-react";
 import {
   createReport,
   listReports,
+  listComments,
+  postComment,
+  deleteComment,
+  setCommentHidden,
+  shareReport,
   supabase,
   type ReportItem,
+  type CommentItem,
 } from "./supabase";
 import pristine from "./assests/city-pristine.png";
 import damaged from "./assests/city-damaged.png";
@@ -495,6 +510,242 @@ function App() {
   return <Dashboard />;
 }
 
+// ── Comment Thread (side panel) ───────────────────────────────────────────────
+
+/** Sanitize comment body for display — strips HTML tags so XSS isn't possible. */
+function sanitize(text: string): string {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function CommentThread({
+  report,
+  currentUserId,
+  isModerator,
+  onClose,
+}: {
+  report: ReportItem;
+  currentUserId: string | undefined;
+  isModerator: boolean;
+  onClose: () => void;
+}) {
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [loadingComments, setLoadingComments] = useState(true);
+  const [body, setBody] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  const load = async () => {
+    setLoadingComments(true);
+    setError("");
+    try {
+      setComments(await listComments(report.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load comments.");
+    } finally {
+      setLoadingComments(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // close on Escape
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report.id]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    const trimmed = body.trim();
+    if (trimmed.length === 0) { setError("Comment cannot be empty."); return; }
+    if (trimmed.length > 1000) { setError("Comment exceeds 1000 characters."); return; }
+    setPosting(true);
+    try {
+      await postComment(report.id, trimmed);
+      setBody("");
+      await load();
+      bodyRef.current?.focus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not post comment.");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const handleDelete = async (commentId: string) => {
+    if (!confirm("Delete this comment?")) return;
+    setError("");
+    try {
+      await deleteComment(commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete comment.");
+    }
+  };
+
+  const handleHide = async (comment: CommentItem) => {
+    setError("");
+    try {
+      await setCommentHidden(comment.id, !comment.hidden);
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === comment.id ? { ...c, hidden: !c.hidden } : c,
+        ),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update comment.");
+    }
+  };
+
+  const visibleComments = isModerator
+    ? comments
+    : comments.filter((c) => !c.hidden || c.authorId === currentUserId);
+
+  return (
+    <aside
+      className={`ct-panel${expanded ? " ct-expanded" : ""}`}
+      role="complementary"
+      aria-label="Community discussion"
+    >
+      {/* thin drag handle / close strip on the left edge */}
+      <div className="ct-edge" onClick={onClose} aria-hidden="true" />
+
+      <div className="ct-inner">
+        {/* header */}
+        <div className="ct-header">
+          <button
+            className="ct-back secondary compact"
+            onClick={onClose}
+            aria-label="Back to feed"
+          >
+            <ArrowLeft /> Back
+          </button>
+          <button
+            className="ct-expand secondary compact"
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={expanded ? "Collapse panel" : "Expand to full screen"}
+          >
+            {expanded ? <Minimize2 /> : <Maximize2 />}
+          </button>
+        </div>
+
+        {/* report context */}
+        <div className="ct-context">
+          <p className="eyebrow">COMMUNITY DISCUSSION</p>
+          <h2 className="ct-title">{report.category}</h2>
+          <p className="muted ct-note">{report.note}</p>
+          <p className="ct-byline">
+            Reported by {report.authorName} ·{" "}
+            {new Date(report.createdAt).toLocaleDateString()}
+          </p>
+        </div>
+
+        {/* comment list */}
+        <div className="ct-list" aria-live="polite" aria-label="Comments">
+          {loadingComments ? (
+            <p className="muted ct-status">
+              <RefreshCw className="spin" /> Loading comments…
+            </p>
+          ) : visibleComments.length === 0 ? (
+            <p className="muted ct-status">
+              No comments yet. Be the first to start the discussion.
+            </p>
+          ) : (
+            visibleComments.map((c) => (
+              <article
+                key={c.id}
+                className={`ct-comment${c.hidden ? " ct-comment--hidden" : ""}`}
+              >
+                <div className="ct-comment-meta">
+                  <strong>{c.authorName}</strong>
+                  <time dateTime={c.createdAt}>
+                    {new Date(c.createdAt).toLocaleString()}
+                  </time>
+                  {c.hidden && (
+                    <span className="ct-hidden-badge">hidden</span>
+                  )}
+                </div>
+                <p
+                  className="ct-comment-body"
+                  dangerouslySetInnerHTML={{ __html: sanitize(c.body) }}
+                />
+                <div className="ct-comment-actions">
+                  {(currentUserId === c.authorId || isModerator) && (
+                    <button
+                      className="secondary compact"
+                      onClick={() => handleDelete(c.id)}
+                      aria-label="Delete comment"
+                    >
+                      <Trash2 /> Delete
+                    </button>
+                  )}
+                  {isModerator && (
+                    <button
+                      className="secondary compact"
+                      onClick={() => handleHide(c)}
+                      aria-label={c.hidden ? "Unhide comment" : "Hide comment"}
+                    >
+                      {c.hidden ? <Eye /> : <EyeOff />}
+                      {c.hidden ? "Unhide" : "Hide"}
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+
+        {/* compose */}
+        {currentUserId ? (
+          <form className="ct-compose" onSubmit={submit} noValidate>
+            <textarea
+              id="ct-body"
+              ref={bodyRef}
+              className="ct-textarea"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Share your observation…"
+              maxLength={1000}
+              rows={3}
+              aria-label="Write a comment"
+              aria-describedby={error ? "ct-error" : undefined}
+            />
+            <div className="ct-compose-footer">
+              <span className={`ct-char${body.trim().length > 950 ? " ct-char--warn" : ""}`}>
+                {body.trim().length}/1000
+              </span>
+              <button
+                className="primary compact"
+                type="submit"
+                disabled={posting || body.trim().length === 0}
+              >
+                {posting ? (
+                  <><RefreshCw className="spin" /> Posting…</>
+                ) : (
+                  <><Send /> Post</>
+                )}
+              </button>
+            </div>
+            {error && (
+              <p id="ct-error" className="ct-error" role="alert">
+                {error}
+              </p>
+            )}
+          </form>
+        ) : (
+          <p className="muted ct-sign-in">Sign in to join the discussion.</p>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 function Dashboard() {
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File>();
@@ -508,6 +759,10 @@ function Dashboard() {
   const [reporting, setReporting] = useState<Match>();
   const [note, setNote] = useState("");
   const [reportMessage, setReportMessage] = useState("");
+  const [activeThread, setActiveThread] = useState<ReportItem | undefined>();
+  const [currentUserId, setCurrentUserId] = useState<string | undefined>();
+  const [isModerator, setIsModerator] = useState(false);
+  const [shareToast, setShareToast] = useState("");
   const preview = useMemo(
     () => (file ? URL.createObjectURL(file) : undefined),
     [file],
@@ -556,6 +811,24 @@ function Dashboard() {
   useEffect(() => {
     void loadReports();
   }, []);
+
+  // Resolve current user id and moderator role for comment thread controls
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      const uid = data.user?.id;
+      setCurrentUserId(uid);
+      if (uid) {
+        supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", uid)
+          .single()
+          .then(({ data: profile }) => {
+            setIsModerator(profile?.role === "moderator");
+          });
+      }
+    });
+  }, []);
   const publishReport = async () => {
     if (!reporting || !coords) return;
     setReportMessage("");
@@ -578,9 +851,20 @@ function Dashboard() {
       );
     }
   };
+  const handleShare = async (report: ReportItem) => {
+    const result = await shareReport(report);
+    if (result === 'copied') {
+      setShareToast("Link copied to clipboard");
+      setTimeout(() => setShareToast(""), 2500);
+    } else if (result === 'error') {
+      setShareToast("Could not share this report");
+      setTimeout(() => setShareToast(""), 2500);
+    }
+  };
   return (
-    <main>
-      <header>
+    <div className={`app-layout${activeThread ? " app-layout--panel" : ""}`}>
+      <main>
+        <header>
         <div className="brand">
           <ShieldCheck /> CivicLens
         </div>
@@ -824,6 +1108,22 @@ function Dashboard() {
                   Reported by {r.authorName} ·{" "}
                   {new Date(r.createdAt).toLocaleDateString()} · {r.status}
                 </small>
+                <div className="report-footer">
+                  <button
+                    className="secondary compact"
+                    onClick={() => setActiveThread(r)}
+                    aria-label={`Open discussion for report: ${r.category}`}
+                  >
+                    <MessageCircle /> Discuss
+                  </button>
+                  <button
+                    className="secondary compact"
+                    onClick={() => handleShare(r)}
+                    aria-label={`Share report: ${r.category}`}
+                  >
+                    <Share2 /> Share
+                  </button>
+                </div>
               </div>
             </article>
           ))
@@ -833,7 +1133,21 @@ function Dashboard() {
         Official records are shown with source attribution. AI helps find
         candidates; it does not verify government facts.
       </footer>
-    </main>
+      </main>
+      {activeThread && (
+        <CommentThread
+          report={activeThread}
+          currentUserId={currentUserId}
+          isModerator={isModerator}
+          onClose={() => setActiveThread(undefined)}
+        />
+      )}
+      {shareToast && (
+        <div className="share-toast" role="status" aria-live="polite">
+          {shareToast}
+        </div>
+      )}
+    </div>
   );
 }
 
