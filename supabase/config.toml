@@ -29,3 +29,6 @@ file_size_limit = "10MiB"
 
 [functions.scan-project]
 verify_jwt = true
+
+[functions.report-preview]
+verify_jwt = false

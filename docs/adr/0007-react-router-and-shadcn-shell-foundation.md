@@ -1,0 +1,5 @@
+# React Router and shadcn shell foundation
+
+**Status: accepted.** CivicLens will keep Vite + React and `src/main.tsx` as its canonical entry point. The immediate shell task replaces the current CivicLens global frame with shadcn's `dashboard-01` block as the single visual application shell: its responsive shell, navigation primitives, header patterns, account controls, and directly useful components may be reused, while analytics cards and generic dashboard content are removed. The existing scan/report/auth/data internals remain mounted inside that shell without intentional product redesign.
+
+**Consequences:** There must be exactly one global application frame after this task; the old CivicLens shell is removed rather than wrapped. `dashboard-01` demo content is removed. Routing redesign, React Router adoption, public Explore/map work, final navigation architecture, broader testing, and unrelated TanStack cleanup are deferred unless directly required to mount the shell. Future product work must preserve the distinction between official-source records, AI interpretation, and citizen-submitted observations.
