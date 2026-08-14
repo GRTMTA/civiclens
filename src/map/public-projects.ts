@@ -12,7 +12,7 @@ export type PublicRpcClient = {
   rpc: (
     functionName: string,
     args: Record<string, unknown>,
-  ) => Promise<{ data: unknown; error: { message?: string } | null }>
+  ) => Promise<{ data: unknown; error: { code?: string; message?: string } | null }>
 }
 
 export class MapConfigurationError extends Error {
@@ -26,6 +26,16 @@ export class InvalidViewportError extends Error {
   constructor() {
     super("Zoom in to load projects for a smaller map area.")
     this.name = "InvalidViewportError"
+  }
+}
+
+export class ProjectDataRequestError extends Error {
+  readonly code?: string
+
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = "ProjectDataRequestError"
+    this.code = code
   }
 }
 
@@ -66,8 +76,10 @@ export function getProjectDataErrorCopy(error: unknown): ProjectDataErrorCopy {
   }
 
   const message = error instanceof Error ? error.message : String(error ?? "")
+  const code = error instanceof ProjectDataRequestError ? error.code : undefined
   const normalized = message.toLowerCase()
   if (
+    code === "PGRST202" ||
     normalized.includes("projects_in_view") &&
     (normalized.includes("schema cache") || normalized.includes("could not find the function"))
   ) {
@@ -79,11 +91,28 @@ export function getProjectDataErrorCopy(error: unknown): ProjectDataErrorCopy {
     }
   }
 
+  if (code === "57014" || normalized.includes("statement timeout")) {
+    return {
+      kind: "query",
+      title: "Project query timed out",
+      description: "The official project query took too long. Zoom in and retry.",
+    }
+  }
+
   return {
     kind: "query",
-    title: "Project data unavailable",
-    description: "Official project records could not be loaded. Retry when the data service is available.",
+    title: "Official project query failed",
+    description: code
+      ? `Supabase returned contract error ${code}. Retry; if it persists, check the public project-map RPC.`
+      : "The official project query contract failed. Retry; if it persists, check the public project-map RPC.",
   }
+}
+
+function throwRpcError(
+  error: { code?: string; message?: string },
+  fallback: string,
+): never {
+  throw new ProjectDataRequestError(error.message || fallback, error.code)
 }
 
 export function getMapStyleUrl(): string | null {
@@ -119,7 +148,7 @@ export async function fetchViewportProjects(
     p_north: bounds.north,
     p_east: bounds.east,
   })
-  if (error) throw new Error(error.message || "Unable to load projects.")
+  if (error) throwRpcError(error, "Unable to load projects.")
   return parseViewportPayload(data)
 }
 
@@ -130,6 +159,6 @@ export async function fetchProjectDetail(
   const { data, error } = await client.rpc("project_detail", {
     p_project_id: projectId,
   })
-  if (error) throw new Error(error.message || "Unable to load project details.")
+  if (error) throwRpcError(error, "Unable to load project details.")
   return parseProjectDetail(data)
 }

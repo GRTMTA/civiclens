@@ -6,6 +6,7 @@ import {
   isInvalidViewportError,
   isMapConfigurationError,
   InvalidViewportError,
+  ProjectDataRequestError,
   MapConfigurationError,
 } from "./public-projects"
 
@@ -89,6 +90,24 @@ describe("public project data seam", () => {
       description:
         "The connected Supabase project is missing the public project-map function. Apply the map migration, then retry.",
     })
+  })
+
+  it("keeps Supabase contract and timeout failures actionable", () => {
+    expect(
+      getProjectDataErrorCopy(
+        new ProjectDataRequestError("canceling statement due to statement timeout", "57014"),
+      ),
+    ).toEqual({
+      kind: "query",
+      title: "Project query timed out",
+      description: "The official project query took too long. Zoom in and retry.",
+    })
+
+    expect(
+      getProjectDataErrorCopy(
+        new ProjectDataRequestError("function projects_in_view is not available", "PGRST202"),
+      ).kind,
+    ).toBe("migration")
   })
 
   it("surfaces public viewport and detail query failures to the caller", async () => {

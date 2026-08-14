@@ -725,6 +725,15 @@ export function ProjectMapSurface() {
     })
   }, [loadViewport, queryError])
 
+  useEffect(() => {
+    if (!response.truncated) return
+    toast.warning("More projects are available", {
+      id: "project-results-truncated",
+      description: "Zoom in for a more complete set of official project records.",
+      duration: 7000,
+    })
+  }, [response.truncated])
+
   useEffect(
     () => () => {
       if (viewportTimerRef.current !== null) {
@@ -882,11 +891,6 @@ export function ProjectMapSurface() {
               title="No official projects in this view"
               description="Pan or zoom the map to browse another area."
             />
-          )}
-          {response.truncated && (
-            <div className="absolute left-3 right-3 top-3 z-10 rounded-lg border border-amber-300 bg-amber-50/95 px-3 py-2 text-xs text-amber-950 shadow-sm backdrop-blur-sm">
-              Results are incomplete. Zoom in to see more projects; cluster counts show returned records only.
-            </div>
           )}
           <div className="absolute bottom-3 left-3 z-10 hidden rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur-sm md:block">
             <div className="mb-2 text-xs font-medium">Status legend</div>
