@@ -5,6 +5,7 @@ import {
   type ProjectDetail,
   type ViewportBounds,
   type ViewportResponse,
+  isQueryableViewportBounds,
 } from "./map-contract"
 
 export type PublicRpcClient = {
@@ -21,10 +22,23 @@ export class MapConfigurationError extends Error {
   }
 }
 
+export class InvalidViewportError extends Error {
+  constructor() {
+    super("Zoom in to load projects for a smaller map area.")
+    this.name = "InvalidViewportError"
+  }
+}
+
 export function isMapConfigurationError(
   error: unknown,
 ): error is MapConfigurationError {
   return error instanceof MapConfigurationError
+}
+
+export function isInvalidViewportError(
+  error: unknown,
+): error is InvalidViewportError {
+  return error instanceof InvalidViewportError
 }
 
 export type ProjectDataErrorCopy = {
@@ -40,6 +54,14 @@ export function getProjectDataErrorCopy(error: unknown): ProjectDataErrorCopy {
       title: "Project data configuration required",
       description:
         "Set the public Supabase configuration to load official project records.",
+    }
+  }
+
+  if (isInvalidViewportError(error)) {
+    return {
+      kind: "query",
+      title: "Zoom in to load projects",
+      description: "The selected map area is too large. Zoom in to request official records.",
     }
   }
 
@@ -90,6 +112,7 @@ export async function fetchViewportProjects(
   bounds: ViewportBounds,
   client: PublicRpcClient = createPublicRpcClient(),
 ): Promise<ViewportResponse> {
+  if (!isQueryableViewportBounds(bounds)) throw new InvalidViewportError()
   const { data, error } = await client.rpc("projects_in_view", {
     p_south: bounds.south,
     p_west: bounds.west,

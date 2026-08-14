@@ -13,6 +13,23 @@ export type ViewportBounds = {
   east: number
 }
 
+export function isQueryableViewportBounds(bounds: ViewportBounds): boolean {
+  return (
+    Number.isFinite(bounds.south) &&
+    Number.isFinite(bounds.west) &&
+    Number.isFinite(bounds.north) &&
+    Number.isFinite(bounds.east) &&
+    bounds.south >= -90 &&
+    bounds.north <= 90 &&
+    bounds.west >= -180 &&
+    bounds.east <= 180 &&
+    bounds.south < bounds.north &&
+    bounds.west < bounds.east &&
+    bounds.north - bounds.south <= 10 &&
+    bounds.east - bounds.west <= 10
+  )
+}
+
 export type ViewportFeature = {
   id: string
   name: string

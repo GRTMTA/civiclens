@@ -45,6 +45,7 @@ import {
   readMapUrlState,
   writeCameraSearch,
   writeProjectSearch,
+  isQueryableViewportBounds,
   type CameraState,
   type DisplayStatus,
   type ProjectDetail,
@@ -769,6 +770,16 @@ export function ProjectMapSurface() {
       setCamera(nextCamera)
       const search = writeCameraSearch(window.location.search, nextCamera)
       window.history.replaceState(null, "", `${window.location.pathname}?${search}`)
+      if (!isQueryableViewportBounds(bounds)) {
+        setQueryState("ready")
+        setQueryError({
+          kind: "query",
+          title: "Zoom in to load projects",
+          description: "The selected map area is too large. Zoom in to request official records.",
+        })
+        return
+      }
+      setQueryError(null)
       if (viewportTimerRef.current !== null) {
         window.clearTimeout(viewportTimerRef.current)
       }

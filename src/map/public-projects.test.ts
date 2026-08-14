@@ -3,7 +3,9 @@ import {
   fetchProjectDetail,
   fetchViewportProjects,
   getProjectDataErrorCopy,
+  isInvalidViewportError,
   isMapConfigurationError,
+  InvalidViewportError,
   MapConfigurationError,
 } from "./public-projects"
 
@@ -43,6 +45,28 @@ describe("public project data seam", () => {
         },
       },
     ])
+  })
+
+  it("rejects an oversized viewport before making the RPC request", async () => {
+    let called = false
+    let caught: unknown
+    try {
+      await fetchViewportProjects(
+        { south: 0, west: 0, north: 20, east: 20 },
+        {
+          rpc: async () => {
+            called = true
+            return { data: null, error: null }
+          },
+        },
+      )
+    } catch (error) {
+      caught = error
+    }
+    expect(isInvalidViewportError(caught)).toBe(true)
+    expect(caught).toBeInstanceOf(InvalidViewportError)
+    expect(called).toBe(false)
+    expect(getProjectDataErrorCopy(caught).title).toBe("Zoom in to load projects")
   })
 
   it("keeps missing public-data configuration distinguishable from query failures", () => {

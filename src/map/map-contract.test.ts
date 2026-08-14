@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  isQueryableViewportBounds,
   normalizeOfficialStatus,
   parseProjectDetail,
   parseViewportPayload,
@@ -7,6 +8,17 @@ import {
   writeCameraSearch,
   writeProjectSearch,
 } from "./map-contract"
+
+describe("viewport bounds", () => {
+  it("rejects bounds wider than the public query limit", () => {
+    expect(
+      isQueryableViewportBounds({ south: 0, west: 0, north: 20, east: 20 }),
+    ).toBe(false)
+    expect(
+      isQueryableViewportBounds({ south: 10, west: 123, north: 11, east: 124 }),
+    ).toBe(true)
+  })
+})
 
 describe("official project map contract", () => {
   it("normalizes pre-construction before the broad construction rule", () => {
