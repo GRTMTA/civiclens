@@ -171,13 +171,7 @@ function MapStatePanel({
   )
 }
 
-function MapNotice({
-  children,
-  action,
-}: {
-  children: React.ReactNode
-  action?: React.ReactNode
-}) {
+function MapNotice({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-amber-300 bg-amber-50/95 px-3 py-1.5 text-xs font-medium text-amber-950 shadow-sm backdrop-blur-sm"
@@ -186,12 +180,11 @@ function MapNotice({
     >
       <Info className="size-3.5" aria-hidden="true" />
       {children}
-      {action}
     </div>
   )
 }
 
-function MapEmptyState({ onReset }: { onReset: () => void }) {
+function MapEmptyNotice({ onReset }: { onReset: () => void }) {
   return (
     <div
       className="absolute left-1/2 top-4 z-10 w-[min(calc(100%-2rem),24rem)] -translate-x-1/2 rounded-lg border border-border bg-background/95 p-3 text-foreground shadow-md backdrop-blur-sm"
@@ -289,9 +282,9 @@ function ProjectList({
         {!loading && !queryError && !configurationRequired && features.length === 0 && (
           <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 p-5 text-center">
             <Search className="size-7 text-muted-foreground" aria-hidden="true" />
-            <p className="font-medium">No official projects in this view</p>
+            <p className="font-medium">No projects in this area</p>
             <p className="text-sm text-muted-foreground">
-              Pan or zoom the map to browse another area.
+              Move around the map or zoom out to discover nearby projects.
             </p>
           </div>
         )}
@@ -857,6 +850,8 @@ export function ProjectMapSurface() {
 
   const resetView = useCallback(() => {
     setCamera(DEFAULT_CAMERA)
+    const search = writeCameraSearch(window.location.search, DEFAULT_CAMERA)
+    window.history.replaceState(null, "", `${window.location.pathname}?${search}`)
     mapRef.current?.flyTo({
       center: [DEFAULT_CAMERA.longitude, DEFAULT_CAMERA.latitude],
       zoom: DEFAULT_CAMERA.zoom,
@@ -918,7 +913,7 @@ export function ProjectMapSurface() {
             />
           )}
           {!queryError && response.features.length === 0 && queryState === "ready" && !mapUnavailable && (
-            <MapEmptyState onReset={resetView} />
+            <MapEmptyNotice onReset={resetView} />
           )}
           <div className="absolute bottom-3 left-3 z-10 hidden rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur-sm md:block">
             <div className="mb-2 text-xs font-medium">Status legend</div>
