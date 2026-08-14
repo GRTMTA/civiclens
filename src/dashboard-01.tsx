@@ -1,6 +1,7 @@
 import * as React from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
+import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { ProjectMapSurface } from "./map/project-map"
@@ -8,6 +9,7 @@ import { ProjectMapSurface } from "./map/project-map"
 export function Dashboard01Page() {
   return (
     <TooltipProvider>
+      <Toaster position="top-right" />
       <SidebarProvider
         style={
           {

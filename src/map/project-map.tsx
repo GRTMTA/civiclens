@@ -8,6 +8,7 @@ import {
   type MapRef,
 } from "react-map-gl/maplibre"
 import type { GeoJSONSource } from "maplibre-gl"
+import { toast } from "sonner"
 import {
   AlertCircle,
   CheckCircle2,
@@ -711,6 +712,19 @@ export function ProjectMapSurface() {
     if (!styleUrl) void loadViewport(DEFAULT_BOUNDS)
   }, [loadViewport, styleUrl])
 
+  useEffect(() => {
+    if (queryError?.kind !== "query") return
+    toast.error(queryError.title, {
+      id: "project-data-query",
+      description: queryError.description,
+      duration: 8000,
+      action: {
+        label: "Retry",
+        onClick: () => void loadViewport(lastBoundsRef.current),
+      },
+    })
+  }, [loadViewport, queryError])
+
   useEffect(
     () => () => {
       if (viewportTimerRef.current !== null) {
@@ -847,23 +861,21 @@ export function ProjectMapSurface() {
               }
             />
           )}
-          {queryError && (
-            <MapNotice
+          {queryError?.kind === "viewport" && (
+            <MapNotice>{queryError.title}</MapNotice>
+          )}
+          {queryError && (queryError.kind === "configuration" || queryError.kind === "migration") && (
+            <MapStatePanel
+              title={queryError.title}
+              description={queryError.description}
               action={
-                queryError.kind !== "viewport" ? (
-                  <Button
-                    className="pointer-events-auto h-6 px-2 text-[11px]"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void loadViewport(lastBoundsRef.current)}
-                  >
-                    Retry
+                queryError.kind === "migration" ? (
+                  <Button variant="outline" size="sm" onClick={() => void loadViewport(lastBoundsRef.current)}>
+                    <RefreshCw aria-hidden="true" /> Retry project data
                   </Button>
                 ) : undefined
               }
-            >
-              {queryError.title}
-            </MapNotice>
+            />
           )}
           {!queryError && response.features.length === 0 && queryState === "ready" && !mapUnavailable && (
             <MapStatePanel
