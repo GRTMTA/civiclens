@@ -11,13 +11,27 @@ import type { GeoJSONSource } from "maplibre-gl"
 import { toast } from "sonner"
 import {
   AlertCircle,
-  CheckCircle2,
+  Banknote,
+  Building2,
+  CalendarClock,
+  CalendarDays,
+  CircleCheck,
   CircleHelp,
+  Clock,
+  Construction,
+  Copy,
+  Database,
+  ExternalLink,
+  FileKey2,
+  FileText,
+  HardHat,
   Info,
   LoaderCircle,
+  MapPin,
   MapPinned,
   RefreshCw,
   Search,
+  type LucideIcon,
 } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -145,8 +159,18 @@ function toGeoJson(response: ViewportResponse) {
 }
 
 function StatusBadge({ status }: { status: DisplayStatus }) {
+  const StatusIcon =
+    status === "completed"
+      ? CircleCheck
+      : status === "ongoing"
+        ? Construction
+        : status === "planned"
+          ? CalendarClock
+          : CircleHelp
+
   return (
     <Badge variant="outline" className={STATUS_CLASSES[status]}>
+      <StatusIcon className="size-3" aria-hidden="true" />
       {statusLabel(status)}
     </Badge>
   )
@@ -321,6 +345,26 @@ function ProjectList({
   )
 }
 
+function DetailRow({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-3 border-b pb-2 last:border-b-0">
+      <dt className="flex min-w-0 items-start gap-2 text-muted-foreground">
+        <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+        <span>{label}</span>
+      </dt>
+      <dd className="min-w-0 break-words text-right">{children}</dd>
+    </div>
+  )
+}
+
 function ProjectDetailContent({
   feature,
   detail,
@@ -336,7 +380,11 @@ function ProjectDetailContent({
 }) {
   if (loading) {
     return (
-      <div className="space-y-4 p-4" aria-live="polite" aria-label="Loading project details">
+      <div
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
+        role="status"
+        aria-label="Loading project details"
+      >
         <Skeleton className="h-6 w-3/4" />
         <Skeleton className="h-5 w-32" />
         <Skeleton className="h-24 w-full" />
@@ -347,33 +395,52 @@ function ProjectDetailContent({
 
   if (error) {
     return (
-      <Alert variant="destructive" className="m-4">
-        <AlertCircle aria-hidden="true" />
-        <AlertTitle>Project details unavailable</AlertTitle>
-        <AlertDescription className="space-y-3">
-          <p>{error}</p>
-          <Button size="sm" variant="outline" onClick={onRetry}>
-            <RefreshCw aria-hidden="true" /> Retry
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <Alert variant="destructive" className="m-4">
+          <AlertCircle aria-hidden="true" />
+          <AlertTitle>Project details unavailable</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{error}</p>
+            <Button size="sm" variant="outline" onClick={onRetry}>
+              <RefreshCw aria-hidden="true" /> Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
     )
   }
 
   if (!detail) {
     return (
-      <Alert className="m-4">
-        <CircleHelp aria-hidden="true" />
-        <AlertTitle>Project unavailable</AlertTitle>
-        <AlertDescription>
-          This project link is no longer available in the public records.
-        </AlertDescription>
-      </Alert>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <Alert className="m-4">
+          <CircleHelp aria-hidden="true" />
+          <AlertTitle>Project unavailable</AlertTitle>
+          <AlertDescription>
+            This project link is no longer available in the public records.
+          </AlertDescription>
+        </Alert>
+      </div>
     )
   }
 
+  const copyContractId = async () => {
+    if (!detail.contractId) return
+    try {
+      await navigator.clipboard.writeText(detail.contractId)
+      toast.success("Contract ID copied", {
+        description: "The official contract identifier is ready to paste.",
+      })
+    } catch (error) {
+      console.error("CivicLens contract ID copy failed", error)
+      toast.error("Couldn't copy the contract ID", {
+        description: "Select the identifier manually and try again.",
+      })
+    }
+  }
+
   return (
-    <div className="space-y-5 overflow-y-auto p-4" tabIndex={-1}>
+    <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4" tabIndex={-1}>
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={detail.displayStatus} />
@@ -383,82 +450,95 @@ function ProjectDetailContent({
           {detail.name}
         </h2>
         <p className="text-sm text-muted-foreground">{detail.location}</p>
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Database className="size-3.5" aria-hidden="true" />
+          Official source: {detail.source}
+        </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3">
+      <dl className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3">
         <div>
-          <dt className="text-xs text-muted-foreground">Official status</dt>
+          <dt className="text-xs text-muted-foreground">Source status</dt>
           <dd className="mt-1 text-sm font-medium">{detail.status || "Unknown"}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted-foreground">Contract amount</dt>
-          <dd className="mt-1 text-sm font-medium">{formatMoney(detail.budget)}</dd>
+          <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Banknote className="size-3.5" aria-hidden="true" />
+            Contract amount
+          </dt>
+          <dd className="mt-1 text-base font-semibold">{formatMoney(detail.budget)}</dd>
         </div>
-      </div>
+      </dl>
 
       {detail.description && (
         <p className="text-sm leading-6 text-muted-foreground">{detail.description}</p>
       )}
 
       <section aria-labelledby="official-details-heading" className="space-y-3">
-        <h3 id="official-details-heading" className="font-heading text-sm font-semibold">
+        <h3 id="official-details-heading" className="flex items-center gap-2 font-heading text-sm font-semibold">
+          <FileText className="size-4 text-muted-foreground" aria-hidden="true" />
           Official details
         </h3>
         <dl className="grid gap-3 text-sm">
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Implementing agency</dt>
-            <dd className="text-right">{detail.agency}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Contractor</dt>
-            <dd className="text-right">{detail.contractor ?? "Not provided"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Contract ID</dt>
-            <dd className="max-w-[12rem] break-all text-right font-mono text-xs">
-              {detail.contractId ?? "Not provided"}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Start date</dt>
-            <dd className="text-right">{formatDate(detail.startDate)}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Completion date</dt>
-            <dd className="text-right">{formatDate(detail.completionDate)}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Progress</dt>
-            <dd className="text-right">
+          <DetailRow icon={Building2} label="Implementing agency">
+            {detail.agency}
+          </DetailRow>
+          <DetailRow icon={HardHat} label="Contractor">
+            {detail.contractor ?? "Not provided"}
+          </DetailRow>
+          <DetailRow icon={FileKey2} label="Contract ID">
+            {detail.contractId ? (
+              <span className="inline-flex max-w-full items-center justify-end gap-1.5">
+                <span className="break-all font-mono text-xs">{detail.contractId}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="shrink-0"
+                  onClick={() => void copyContractId()}
+                  aria-label="Copy contract ID"
+                  title="Copy contract ID"
+                >
+                  <Copy aria-hidden="true" />
+                </Button>
+              </span>
+            ) : (
+              "Not provided"
+            )}
+          </DetailRow>
+          <DetailRow icon={CalendarDays} label="Start date">
+            {formatDate(detail.startDate)}
+          </DetailRow>
+          <DetailRow icon={CalendarDays} label="Completion date">
+            {formatDate(detail.completionDate)}
+          </DetailRow>
+          <DetailRow icon={Construction} label="Progress">
+            <span className="font-medium">
               {detail.progress === undefined ? "Not provided" : `${detail.progress}%`}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Amount paid</dt>
-            <dd className="text-right">{formatMoney(detail.amountPaid)}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Infrastructure year</dt>
-            <dd className="text-right">{detail.infrastructureYear ?? "Not provided"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Program</dt>
-            <dd className="text-right">{detail.programName ?? "Not provided"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Source of funds</dt>
-            <dd className="text-right">{detail.sourceOfFunds ?? "Not provided"}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Last checked</dt>
-            <dd className="text-right">{formatDate(detail.lastChecked)}</dd>
-          </div>
+            </span>
+          </DetailRow>
+          <DetailRow icon={Banknote} label="Amount paid">
+            {formatMoney(detail.amountPaid)}
+          </DetailRow>
+          <DetailRow icon={CalendarDays} label="Infrastructure year">
+            {detail.infrastructureYear ?? "Not provided"}
+          </DetailRow>
+          <DetailRow icon={FileText} label="Program">
+            {detail.programName ?? "Not provided"}
+          </DetailRow>
+          <DetailRow icon={Banknote} label="Source of funds">
+            {detail.sourceOfFunds ?? "Not provided"}
+          </DetailRow>
+          <DetailRow icon={Clock} label="Last checked">
+            {formatDate(detail.lastChecked)}
+          </DetailRow>
         </dl>
       </section>
 
       <Separator />
       <section aria-labelledby="provenance-heading" className="space-y-2">
-        <h3 id="provenance-heading" className="font-heading text-sm font-semibold">
+        <h3 id="provenance-heading" className="flex items-center gap-2 font-heading text-sm font-semibold">
+          <Database className="size-4 text-muted-foreground" aria-hidden="true" />
           Source attribution
         </h3>
         <p className="text-sm text-muted-foreground">
@@ -469,12 +549,13 @@ function ProjectDetailContent({
         {detail.sourceUrl && (
           <Button variant="outline" size="sm" asChild>
             <a href={detail.sourceUrl} target="_blank" rel="noreferrer">
-              Open official record
+              Open official record <ExternalLink aria-hidden="true" />
             </a>
           </Button>
         )}
       </section>
-      <p className="text-xs text-muted-foreground">
+      <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+        <MapPin className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
         Recorded project location: {detail.latitude.toFixed(5)}, {detail.longitude.toFixed(5)}
       </p>
       {feature && feature.rawStatus !== detail.status && (
@@ -505,7 +586,7 @@ function ProjectDetailPanel({
 }) {
   return (
     <Sheet open={Boolean(selectedId)} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-md">
+      <SheetContent side="right" className="w-full overflow-hidden p-0 sm:max-w-md">
         <SheetHeader className="border-b pr-14">
           <SheetTitle>Official project record</SheetTitle>
           <SheetDescription>
