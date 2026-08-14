@@ -37,6 +37,36 @@ export async function listReports():Promise<ReportItem[]> {
   }));
 }
 
+// ── Share links ───────────────────────────────────────────────────────────────
+
+export function getReportShareUrl(reportId: string): string {
+  return `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/report-preview?id=${encodeURIComponent(reportId)}`;
+}
+
+export async function shareReport(report: ReportItem): Promise<'shared' | 'copied' | 'error'> {
+  const url = getReportShareUrl(report.id);
+  const title = `${report.category} anomaly — CivicLens`;
+  const text = `${report.note.slice(0, 120)}${report.note.length > 120 ? '…' : ''}`;
+
+  if (typeof navigator !== 'undefined' && navigator.share) {
+    try {
+      await navigator.share({ title, text, url });
+      return 'shared';
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return 'error';
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(url);
+    return 'copied';
+  } catch {
+    return 'error';
+  }
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
 export async function createReport(input:{projectId:string;category:string;note:string;latitude:number;longitude:number;photo?:File}) {
   const {data:{user}} = await supabase.auth.getUser();
   if (!user) throw new Error('Sign in to publish a report.');
