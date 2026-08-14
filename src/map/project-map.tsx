@@ -191,6 +191,28 @@ function MapNotice({
   )
 }
 
+function MapEmptyState({ onReset }: { onReset: () => void }) {
+  return (
+    <div
+      className="absolute left-1/2 top-4 z-10 w-[min(calc(100%-2rem),24rem)] -translate-x-1/2 rounded-lg border border-border bg-background/95 p-3 text-foreground shadow-md backdrop-blur-sm"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 space-y-0.5">
+          <p className="text-sm font-semibold">No projects in this area</p>
+          <p className="text-xs text-muted-foreground">
+            Move around the map or zoom out to discover nearby projects.
+          </p>
+        </div>
+        <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={onReset}>
+          Reset view
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function ProjectList({
   features,
   selectedId,
@@ -833,6 +855,15 @@ export function ProjectMapSurface() {
     [loadViewport],
   )
 
+  const resetView = useCallback(() => {
+    setCamera(DEFAULT_CAMERA)
+    mapRef.current?.flyTo({
+      center: [DEFAULT_CAMERA.longitude, DEFAULT_CAMERA.latitude],
+      zoom: DEFAULT_CAMERA.zoom,
+      essential: true,
+    })
+  }, [])
+
   const mapStyleMissing = !styleUrl
   const mapUnavailable = mapStyleMissing || styleFailure
 
@@ -887,10 +918,7 @@ export function ProjectMapSurface() {
             />
           )}
           {!queryError && response.features.length === 0 && queryState === "ready" && !mapUnavailable && (
-            <MapStatePanel
-              title="No official projects in this view"
-              description="Pan or zoom the map to browse another area."
-            />
+            <MapEmptyState onReset={resetView} />
           )}
           <div className="absolute bottom-3 left-3 z-10 hidden rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur-sm md:block">
             <div className="mb-2 text-xs font-medium">Status legend</div>
