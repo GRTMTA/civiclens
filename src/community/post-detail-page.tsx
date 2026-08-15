@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CommentThread } from "./comment-thread"
+import { requestSignIn } from "./community-auth"
 import { CommunityRightRail } from "./community-right-rail"
 import { CommunityShell } from "./community-shell"
 import { relativeTime, type SortOption, type TopicId } from "./community-contract"
@@ -62,6 +63,20 @@ export function PostDetailPage({ postId }: { postId: string }) {
   const thread = usePostThread(postId)
   // The shell's sort/topic controls navigate back to the feed from here.
   const [sort, setSort] = useState<SortOption>("popular")
+
+  // Guests are sent into the existing login flow rather than shown extra
+  // sign-in buttons beside every interactive control. Clicks before the viewer
+  // resolves are ignored so a signed-in resident is never bounced to /login.
+  const requireViewer = useCallback(
+    (action: () => void) => {
+      if (thread.canInteract) {
+        action()
+        return
+      }
+      if (thread.viewerReady) requestSignIn()
+    },
+    [thread.canInteract, thread.viewerReady],
+  )
 
   const goToFeed = useCallback((search: string) => {
     window.location.assign(`/community${search}`)
@@ -143,7 +158,7 @@ export function PostDetailPage({ postId }: { postId: string }) {
                     <VoteControl
                       score={post.score}
                       vote={post.viewerVote}
-                      onVote={thread.votePost}
+                      onVote={(direction) => requireViewer(() => thread.votePost(direction))}
                       label={post.title}
                       canInteract={thread.canInteract}
                     />
@@ -200,7 +215,9 @@ export function PostDetailPage({ postId }: { postId: string }) {
               <CommentThread
                 comments={thread.comments}
                 commentCount={thread.commentCount}
-                onVote={thread.voteComment}
+                onVote={(commentId, direction) =>
+                  requireViewer(() => thread.voteComment(commentId, direction))
+                }
                 onReply={thread.addComment}
                 composerId={COMPOSER_ID}
                 canInteract={thread.canInteract}

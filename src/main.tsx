@@ -1,96 +1,21 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Session } from "@supabase/supabase-js";
+import { ShieldCheck, ArrowRight, MousePointer2 } from "lucide-react";
 import {
-  Camera,
-  MapPin,
-  ShieldCheck,
-  AlertTriangle,
-  RefreshCw,
-  LogOut,
-  ArrowRight,
-  MousePointer2,
-  MessageCircle,
-  Trash2,
-  EyeOff,
-  Eye,
-  Send,
-  ArrowLeft,
-  Maximize2,
-  Minimize2,
-  Share2,
-} from "lucide-react";
-import {
-  createReport,
-  listReports,
-  listComments,
-  postComment,
-  deleteComment,
-  setCommentHidden,
-  shareReport,
-  supabase,
-  type ReportItem,
-  type CommentItem,
-} from "./supabase";
+  isAppPath,
+  LANDING_PATH,
+  LOGIN_PATH,
+  POST_LOGIN_PATH,
+  REGISTER_PATH,
+} from "./app-routes";
+import { supabase } from "./supabase";
 import pristine from "./assets/city-pristine.png";
 import damaged from "./assets/city-damaged.png";
 import "./styles.css";
 import "./auth.css";
 
-type Project = {
-  id: string;
-  contractId?: string;
-  name: string;
-  category: string;
-  description: string;
-  agency: string;
-  contractor?: string;
-  budget?: number;
-  amountPaid?: number;
-  status: string;
-  progress?: number;
-  location: string;
-  region?: string;
-  districtOffice?: string;
-  programName?: string;
-  infrastructureYear?: string;
-  startDate?: string;
-  completionDate?: string;
-  sourceOfFunds?: string;
-  livestreamUrl?: string;
-  sourceRevision?: string;
-  sourceImportedAt?: string;
-  sourceUrl: string;
-  lastChecked: string;
-};
-type Citation = {
-  title: string;
-  publisher: string;
-  url: string | null;
-  accessDate: string;
-  trusted: boolean;
-};
-type Match = { project: Project; confidence: number; evidence: string[]; citations: Citation[] };
-type ScanResult = {
-  status: string;
-  isDemo?: boolean;
-  analysis?: unknown;
-  matches?: Match[];
-  error?: string;
-};
-
 const SPOTLIGHT_RADIUS = 240;
-
-function money(amount: number | undefined): string {
-  if (amount == null) return "Not reported";
-  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 0 }).format(amount);
-}
-
-function shortDate(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-PH", { year: "numeric", month: "short" });
-}
 
 function Landing({ onSignIn }: { onSignIn: () => void }) {
   const mouse = useRef({ x: -999, y: -999 });
@@ -192,7 +117,7 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
         <div className="civic-cta">
           <p>Move across the city to reveal the damage beneath the surface.</p>
           <button onClick={onSignIn}>
-            Start Scanning <ArrowRight />
+            Get Started <ArrowRight />
           </button>
         </div>
       </section>
@@ -276,7 +201,7 @@ function AuthForm({
         // Session is null when email confirmation is still required (hosted project
         // with confirmations enabled). In that case tell the user to check their
         // email. When confirmations are disabled a session arrives immediately and
-        // onAuthStateChange("SIGNED_IN") will redirect to the dashboard before this
+        // onAuthStateChange("SIGNED_IN") will redirect to the community before this
         // message would ever be seen — but we set it anyway as a safe fallback.
         if (!data.session) {
           setMessage("Check your email to activate your CivicLens account.");
@@ -333,7 +258,7 @@ function AuthForm({
                 {isRegistration ? (
                   "Track public works, document local conditions, and help your community demand accountability."
                 ) : (
-                  <><strong>Log in</strong> to review scans, track projects, and manage community reports.</>
+                  <><strong>Log in</strong> to post, comment, and vote in the CivicLens community.</>
                 )}
               </p>
             </div>
@@ -422,21 +347,46 @@ function getConfirmationError(): string | null {
 }
 
 /**
- * Compatibility route for the scan experience.
- *
- * `/community` now serves the community discussion surface, so the
- * authenticated scan/report Dashboard below is reachable at `/scan` until it
- * moves into the shared application shell.
+ * Shown for any path this bundle does not own, including the removed `/scan`
+ * route, so a dead link reports itself instead of rendering the landing page.
  */
-const SCAN_PATH = "/scan";
+function NotFound({ onHome }: { onHome: () => void }) {
+  useEffect(() => {
+    document.title = "Page not found — CivicLens";
+  }, []);
+  return (
+    <main>
+      <div className="hero">
+        <p className="eyebrow">PAGE NOT FOUND</p>
+        <h2>This page doesn’t exist.</h2>
+        <p className="muted">
+          The link may be out of date. CivicLens now has the resident community and the
+          project map.
+        </p>
+        <div className="actions">
+          <button className="primary" type="button" onClick={onHome}>
+            Back to CivicLens
+          </button>
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => window.location.assign(POST_LOGIN_PATH)}
+          >
+            Go to Community
+          </button>
+        </div>
+      </div>
+    </main>
+  );
+}
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(getConfirmationError);
   const getAuthMode = () => {
-    if (window.location.pathname === "/register") return "sign-up" as const;
-    if (window.location.pathname === "/login") return "sign-in" as const;
+    if (window.location.pathname === REGISTER_PATH) return "sign-up" as const;
+    if (window.location.pathname === LOGIN_PATH) return "sign-in" as const;
     return null;
   };
   const [authMode, setAuthMode] = useState<"sign-in" | "sign-up" | null>(getAuthMode);
@@ -445,19 +395,24 @@ function App() {
     window.history[replace ? "replaceState" : "pushState"]({}, "", nextPath);
     setPath(nextPath);
     setAuthMode(
-      nextPath === "/register"
+      nextPath === REGISTER_PATH
         ? "sign-up"
-        : nextPath === "/login"
+        : nextPath === LOGIN_PATH
           ? "sign-in"
           : null,
     );
   };
+  const openCommunity = () => {
+    // `/community` is a separate bundle (see src/app-entry.ts), so this is a
+    // document navigation rather than a history push within this one.
+    window.location.replace(POST_LOGIN_PATH);
+  };
   const navigateAuth = (mode: "sign-in" | "sign-up") => {
-    navigate(mode === "sign-up" ? "/register" : "/login");
+    navigate(mode === "sign-up" ? REGISTER_PATH : LOGIN_PATH);
   };
   const openLanding = () => {
     document.title = "CivicLens";
-    navigate("/");
+    navigate(LANDING_PATH);
   };
 
   useEffect(() => {
@@ -465,9 +420,9 @@ function App() {
       const nextPath = window.location.pathname;
       setPath(nextPath);
       setAuthMode(
-        nextPath === "/register"
+        nextPath === REGISTER_PATH
           ? "sign-up"
-          : nextPath === "/login"
+          : nextPath === LOGIN_PATH
             ? "sign-in"
             : null,
       );
@@ -485,9 +440,9 @@ function App() {
       setSession(next);
       if (event === "SIGNED_IN") {
         setConfirmError(null);
-        navigate(SCAN_PATH, true);
+        openCommunity();
       } else if (event === "SIGNED_OUT") {
-        navigate("/", true);
+        navigate(LANDING_PATH, true);
       }
     });
     return () => data.subscription.unsubscribe();
@@ -495,12 +450,9 @@ function App() {
 
   useEffect(() => {
     if (!authReady) return;
-    if (!session && path === SCAN_PATH) {
-      navigate("/login", true);
-      return;
-    }
-    if (session && (path === "/login" || path === "/register")) {
-      navigate(SCAN_PATH, true);
+    // A signed-in resident has no reason to sit on the auth forms.
+    if (session && (path === LOGIN_PATH || path === REGISTER_PATH)) {
+      openCommunity();
     }
   }, [authReady, path, session]);
 
@@ -525,7 +477,7 @@ function App() {
         </section>
         <section className="auth-pane">
           <div className="auth-card">
-            <button type="button" className="auth-back" onClick={() => { setConfirmError(null); navigate("/", true); }} aria-label="Back to CivicLens home">
+            <button type="button" className="auth-back" onClick={() => { setConfirmError(null); navigate(LANDING_PATH, true); }} aria-label="Back to CivicLens home">
               <span aria-hidden="true">←</span> CivicLens
             </button>
             <div className="auth-form" style={{ textAlign: "center" }}>
@@ -538,7 +490,7 @@ function App() {
               <button
                 className="auth-submit"
                 type="button"
-                onClick={() => { setConfirmError(null); navigate("/login", true); }}
+                onClick={() => { setConfirmError(null); navigate(LOGIN_PATH, true); }}
               >
                 <span>Log in to CivicLens</span>
                 <svg viewBox="0 0 22 22" aria-hidden="true">
@@ -551,708 +503,16 @@ function App() {
       </main>
     );
 
-  if (path === SCAN_PATH) {
-    return session ? <Dashboard /> : <AuthForm mode="sign-in" onBack={openLanding} onModeChange={navigateAuth} />;
-  }
-
   if (authMode) {
     if (session) return null;
     return <AuthForm key={authMode} mode={authMode} onBack={openLanding} onModeChange={navigateAuth} />;
   }
 
+  // Removed routes (the former /scan screen among them) resolve here rather
+  // than quietly rendering the landing page at the wrong URL.
+  if (!isAppPath(path)) return <NotFound onHome={openLanding} />;
+
   return <Landing onSignIn={() => navigateAuth("sign-in")} />;
-}
-
-// ── Comment Thread (side panel) ───────────────────────────────────────────────
-
-/** Sanitize comment body for display — strips HTML tags so XSS isn't possible. */
-function sanitize(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function CommentThread({
-  report,
-  currentUserId,
-  isModerator,
-  onClose,
-}: {
-  report: ReportItem;
-  currentUserId: string | undefined;
-  isModerator: boolean;
-  onClose: () => void;
-}) {
-  const [comments, setComments] = useState<CommentItem[]>([]);
-  const [loadingComments, setLoadingComments] = useState(true);
-  const [body, setBody] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState(false);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-
-  const load = async () => {
-    setLoadingComments(true);
-    setError("");
-    try {
-      setComments(await listComments(report.id));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load comments.");
-    } finally {
-      setLoadingComments(false);
-    }
-  };
-
-  useEffect(() => {
-    void load();
-    // close on Escape
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id]);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    const trimmed = body.trim();
-    if (trimmed.length === 0) { setError("Comment cannot be empty."); return; }
-    if (trimmed.length > 1000) { setError("Comment exceeds 1000 characters."); return; }
-    setPosting(true);
-    try {
-      await postComment(report.id, trimmed);
-      setBody("");
-      await load();
-      bodyRef.current?.focus();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not post comment.");
-    } finally {
-      setPosting(false);
-    }
-  };
-
-  const handleDelete = async (commentId: string) => {
-    if (!confirm("Delete this comment?")) return;
-    setError("");
-    try {
-      await deleteComment(commentId);
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not delete comment.");
-    }
-  };
-
-  const handleHide = async (comment: CommentItem) => {
-    setError("");
-    try {
-      await setCommentHidden(comment.id, !comment.hidden);
-      setComments((prev) =>
-        prev.map((c) =>
-          c.id === comment.id ? { ...c, hidden: !c.hidden } : c,
-        ),
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not update comment.");
-    }
-  };
-
-  const visibleComments = isModerator
-    ? comments
-    : comments.filter((c) => !c.hidden || c.authorId === currentUserId);
-
-  return (
-    <aside
-      className={`ct-panel${expanded ? " ct-expanded" : ""}`}
-      role="complementary"
-      aria-label="Community discussion"
-    >
-      {/* thin drag handle / close strip on the left edge */}
-      <div className="ct-edge" onClick={onClose} aria-hidden="true" />
-
-      <div className="ct-inner">
-        {/* header */}
-        <div className="ct-header">
-          <button
-            className="ct-back secondary compact"
-            onClick={onClose}
-            aria-label="Back to feed"
-          >
-            <ArrowLeft /> Back
-          </button>
-          <button
-            className="ct-expand secondary compact"
-            onClick={() => setExpanded((v) => !v)}
-            aria-label={expanded ? "Collapse panel" : "Expand to full screen"}
-          >
-            {expanded ? <Minimize2 /> : <Maximize2 />}
-          </button>
-        </div>
-
-        {/* report context */}
-        <div className="ct-context">
-          <p className="eyebrow">COMMUNITY DISCUSSION</p>
-          <h2 className="ct-title">{report.category}</h2>
-          <p className="muted ct-note">{report.note}</p>
-          <p className="ct-byline">
-            Reported by {report.authorName} ·{" "}
-            {new Date(report.createdAt).toLocaleDateString()}
-          </p>
-        </div>
-
-        {/* comment list */}
-        <div className="ct-list" aria-live="polite" aria-label="Comments">
-          {loadingComments ? (
-            <p className="muted ct-status">
-              <RefreshCw className="spin" /> Loading comments…
-            </p>
-          ) : visibleComments.length === 0 ? (
-            <p className="muted ct-status">
-              No comments yet. Be the first to start the discussion.
-            </p>
-          ) : (
-            visibleComments.map((c) => (
-              <article
-                key={c.id}
-                className={`ct-comment${c.hidden ? " ct-comment--hidden" : ""}`}
-              >
-                <div className="ct-comment-meta">
-                  <strong>{c.authorName}</strong>
-                  <time dateTime={c.createdAt}>
-                    {new Date(c.createdAt).toLocaleString()}
-                  </time>
-                  {c.hidden && (
-                    <span className="ct-hidden-badge">hidden</span>
-                  )}
-                </div>
-                <p
-                  className="ct-comment-body"
-                  dangerouslySetInnerHTML={{ __html: sanitize(c.body) }}
-                />
-                <div className="ct-comment-actions">
-                  {(currentUserId === c.authorId || isModerator) && (
-                    <button
-                      className="secondary compact"
-                      onClick={() => handleDelete(c.id)}
-                      aria-label="Delete comment"
-                    >
-                      <Trash2 /> Delete
-                    </button>
-                  )}
-                  {isModerator && (
-                    <button
-                      className="secondary compact"
-                      onClick={() => handleHide(c)}
-                      aria-label={c.hidden ? "Unhide comment" : "Hide comment"}
-                    >
-                      {c.hidden ? <Eye /> : <EyeOff />}
-                      {c.hidden ? "Unhide" : "Hide"}
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))
-          )}
-        </div>
-
-        {/* compose */}
-        {currentUserId ? (
-          <form className="ct-compose" onSubmit={submit} noValidate>
-            <textarea
-              id="ct-body"
-              ref={bodyRef}
-              className="ct-textarea"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Share your observation…"
-              maxLength={1000}
-              rows={3}
-              aria-label="Write a comment"
-              aria-describedby={error ? "ct-error" : undefined}
-            />
-            <div className="ct-compose-footer">
-              <span className={`ct-char${body.trim().length > 950 ? " ct-char--warn" : ""}`}>
-                {body.trim().length}/1000
-              </span>
-              <button
-                className="primary compact"
-                type="submit"
-                disabled={posting || body.trim().length === 0}
-              >
-                {posting ? (
-                  <><RefreshCw className="spin" /> Posting…</>
-                ) : (
-                  <><Send /> Post</>
-                )}
-              </button>
-            </div>
-            {error && (
-              <p id="ct-error" className="ct-error" role="alert">
-                {error}
-              </p>
-            )}
-          </form>
-        ) : (
-          <p className="muted ct-sign-in">Sign in to join the discussion.</p>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function Dashboard() {
-  const input = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File>();
-  const [coords, setCoords] = useState<{
-    latitude: number;
-    longitude: number;
-  }>();
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ScanResult>();
-  const [reports, setReports] = useState<ReportItem[]>([]);
-  const [reporting, setReporting] = useState<Match>();
-  const [note, setNote] = useState("");
-  const [reportMessage, setReportMessage] = useState("");
-  const [activeThread, setActiveThread] = useState<ReportItem | undefined>();
-  const [currentUserId, setCurrentUserId] = useState<string | undefined>();
-  const [isModerator, setIsModerator] = useState(false);
-  const [shareToast, setShareToast] = useState("");
-  const preview = useMemo(
-    () => (file ? URL.createObjectURL(file) : undefined),
-    [file],
-  );
-  useEffect(
-    () => () => {
-      if (preview) URL.revokeObjectURL(preview);
-    },
-    [preview],
-  );
-  const locate = () =>
-    navigator.geolocation.getCurrentPosition(
-      (p) =>
-        setCoords({
-          latitude: p.coords.latitude,
-          longitude: p.coords.longitude,
-        }),
-      () => alert("Location is needed to match nearby projects."),
-    );
-  const scan = async () => {
-    if (!file || !coords) return;
-    setLoading(true);
-    setResult(undefined);
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("latitude", String(coords.latitude));
-    fd.append("longitude", String(coords.longitude));
-    const { data, error } = await supabase.functions.invoke<ScanResult>(
-      "scan-project",
-      { body: fd },
-    );
-    setResult(
-      error
-        ? { status: "error", error: error.message }
-        : (data ?? { status: "error", error: "Empty scan response" }),
-    );
-    setLoading(false);
-  };
-  const loadReports = async () => {
-    try {
-      setReports(await listReports());
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Unable to load reports");
-    }
-  };
-  useEffect(() => {
-    void loadReports();
-  }, []);
-
-  // Resolve current user id and moderator role for comment thread controls
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const uid = data.user?.id;
-      setCurrentUserId(uid);
-      if (uid) {
-        supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", uid)
-          .single()
-          .then(({ data: profile }) => {
-            setIsModerator(profile?.role === "moderator");
-          });
-      }
-    });
-  }, []);
-  const publishReport = async () => {
-    if (!reporting || !coords) return;
-    setReportMessage("");
-    try {
-      await createReport({
-        projectId: reporting.project.id,
-        category: reporting.project.category,
-        note,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        photo: file,
-      });
-      setNote("");
-      setReporting(undefined);
-      setReportMessage("Report published for community review.");
-      await loadReports();
-    } catch (error) {
-      setReportMessage(
-        error instanceof Error ? error.message : "Unable to publish report",
-      );
-    }
-  };
-  const handleShare = async (report: ReportItem) => {
-    const result = await shareReport(report);
-    if (result === 'copied') {
-      setShareToast("Link copied to clipboard");
-      setTimeout(() => setShareToast(""), 2500);
-    } else if (result === 'error') {
-      setShareToast("Could not share this report");
-      setTimeout(() => setShareToast(""), 2500);
-    }
-  };
-  return (
-    <div className={`app-layout${activeThread ? " app-layout--panel" : ""}`}>
-      <main>
-        <header>
-        <div className="brand">
-          <ShieldCheck /> CivicLens
-        </div>
-        <button
-          className="secondary compact"
-          onClick={() => supabase.auth.signOut()}
-        >
-          <LogOut /> Sign out
-        </button>
-      </header>
-      <section className="hero">
-        <p className="eyebrow">TRANSPARENCY, IN YOUR HANDS</p>
-        <h1>See what your city is building.</h1>
-        <p>
-          Photograph public infrastructure in Cebu City and connect it to
-          verified project records.
-        </p>
-        <div className="actions">
-          <button className="primary" onClick={() => input.current?.click()}>
-            <Camera /> Take a project photo
-          </button>
-          <button className="secondary" onClick={locate}>
-            <MapPin /> {coords ? "Location ready" : "Allow location"}
-          </button>
-        </div>
-        <input
-          ref={input}
-          hidden
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          capture="environment"
-          onChange={(e) => {
-            setFile(e.target.files?.[0]);
-            setResult(undefined);
-          }}
-        />
-      </section>
-      {file && (
-        <section className="card">
-          <img className="preview" src={preview} alt="Selected project" />
-          <div>
-            <h2>{file.name}</h2>
-            <p className="muted">
-              {coords
-                ? "Ready to analyze with location evidence."
-                : "Allow location to continue."}
-            </p>
-            <button
-              className="primary"
-              disabled={!coords || loading}
-              onClick={scan}
-            >
-              {loading ? (
-                <>
-                  <RefreshCw className="spin" /> Analyzing…
-                </>
-              ) : (
-                <>Identify this project</>
-              )}
-            </button>
-          </div>
-        </section>
-      )}
-      {result && (
-        <section className="results">
-          <h2>
-            {result.status === "error"
-              ? "Scan unavailable"
-              : result.status === "needs_retake"
-                ? "We need a clearer photo"
-                : "Possible official projects"}
-          </h2>
-          {result.isDemo && (
-            <div className="demo-banner" role="note">
-              <AlertTriangle />
-              <span>
-                <strong>Demo mode</strong> — no AI key configured. Results below
-                are placeholder data, not real government records.
-              </span>
-            </div>
-          )}
-          {result.error ? (
-            <div className="notice">
-              <AlertTriangle />
-              <p>{result.error}</p>
-            </div>
-          ) : result.status === "needs_retake" ? (
-            <div className="notice">
-              <AlertTriangle />
-              <p>
-                We couldn’t confidently connect this image to an official
-                record. Capture the project signboard or a wider, clearer angle
-                and try again.
-              </p>
-            </div>
-          ) : (
-            result.matches?.map((m) => (
-              <article className="project" key={m.project.id}>
-                <div>
-                  <span className="tag">
-                    {Math.round(m.confidence * 100)}% match
-                  </span>
-                  <h3>{m.project.name}</h3>
-                  <p>{m.project.description}</p>
-                  <p className="muted">
-                    {m.project.location} · {m.project.status} ·{" "}
-                    {m.project.agency}
-                  </p>
-                  {m.project.contractId && (
-                    <p>
-                      <strong>Contract:</strong> {m.project.contractId}
-                    </p>
-                  )}
-                  <dl className="project-meta">
-                    <div>
-                      <dt>Contractor</dt>
-                      <dd>{m.project.contractor || "Not reported"}</dd>
-                    </div>
-                    <div>
-                      <dt>Budget</dt>
-                      <dd>{money(m.project.budget)}</dd>
-                    </div>
-                    <div>
-                      <dt>Amount paid</dt>
-                      <dd>{money(m.project.amountPaid)}</dd>
-                    </div>
-                    <div>
-                      <dt>Timeline</dt>
-                      <dd>
-                        {[
-                          shortDate(m.project.startDate),
-                          shortDate(m.project.completionDate),
-                        ]
-                          .filter(Boolean)
-                          .join(" – ") || "Not reported"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Program</dt>
-                      <dd>{m.project.programName || "Not reported"}</dd>
-                    </div>
-                    <div>
-                      <dt>Funding</dt>
-                      <dd>{m.project.sourceOfFunds || "Not reported"}</dd>
-                    </div>
-                  </dl>
-
-                  {/* ── AI visual inference — separated from official facts ── */}
-                  <div className="inference-block">
-                    <p className="inference-label">
-                      AI visual inference
-                      {result.isDemo && (
-                        <span className="unverified-badge">demo</span>
-                      )}
-                    </p>
-                    <ul className="evidence-list">
-                      {m.evidence.map((e, i) => (
-                        <li key={i}>{e}</li>
-                      ))}
-                    </ul>
-                    <p className="inference-disclaimer">
-                      AI suggests candidates from visual clues only. It does not
-                      verify government facts or claim project identity.
-                    </p>
-                  </div>
-
-                  {/* ── Structured citations grounded in database records ── */}
-                  <div className="citations-block">
-                    <p className="citations-label">Sources</p>
-                    <ol className="citations-list">
-                      {(m.citations ?? []).map((c, i) => (
-                        <li key={i} className="citation-item">
-                          {c.url ? (
-                            <a
-                              href={c.url}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              className={c.trusted ? "citation-link" : "citation-link citation-link--untrusted"}
-                            >
-                              {c.title}
-                            </a>
-                          ) : (
-                            <span className="citation-title">{c.title}</span>
-                          )}
-                          <span className="citation-meta">
-                            {c.publisher}
-                            {!c.trusted && c.url && (
-                              <span className="unverified-badge">unverified source</span>
-                            )}
-                            {" · "}Accessed {c.accessDate}
-                          </span>
-                          {!c.url && (
-                            <span className="unverified-badge">no source URL</span>
-                          )}
-                        </li>
-                      ))}
-                    </ol>
-                    <p className="citations-note">
-                      BetterGov.PH snapshot{" "}
-                      {m.project.sourceRevision?.slice(0, 8) || "unknown"} ·
-                      imported{" "}
-                      {shortDate(m.project.sourceImportedAt) || "date unavailable"}
-                    </p>
-                  </div>
-
-                  {m.project.livestreamUrl && (
-                    <a
-                      href={m.project.livestreamUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      View livestream ↗
-                    </a>
-                  )}
-                  <button
-                    className="secondary compact"
-                    onClick={() => setReporting(m)}
-                  >
-                    Report anomaly
-                  </button>
-                </div>
-                <div className="progress">
-                  <strong>
-                    {m.project.progress ?? "—"}
-                    {m.project.progress ? "%" : ""}
-                  </strong>
-                  <small>reported progress</small>
-                </div>
-              </article>
-            ))
-          )}
-        </section>
-      )}
-      {reporting && (
-        <section className="report-form card">
-          <div>
-            <h2>Report an anomaly</h2>
-            <p className="muted">{reporting.project.name}</p>
-            <label>
-              What did you observe?
-              <textarea
-                minLength={5}
-                maxLength={2000}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Describe the issue without including personal information."
-              />
-            </label>
-            <div className="actions">
-              <button
-                className="primary"
-                disabled={note.trim().length < 5}
-                onClick={publishReport}
-              >
-                Publish report
-              </button>
-              <button
-                className="secondary"
-                onClick={() => setReporting(undefined)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
-      {reportMessage && (
-        <p role="status" className="muted">
-          {reportMessage}
-        </p>
-      )}
-      <section className="feed">
-        <div className="feed-title">
-          <div>
-            <p className="eyebrow">COMMUNITY WATCH</p>
-            <h2>Anomaly reports</h2>
-          </div>
-          <button className="secondary" onClick={loadReports}>
-            Refresh feed
-          </button>
-        </div>
-        {reports.length === 0 ? (
-          <p className="muted">Reports from residents will appear here.</p>
-        ) : (
-          reports.map((r) => (
-            <article className="report" key={r.id}>
-              <AlertTriangle />
-              <div>
-                <strong>{r.category}</strong>
-                <p>{r.note}</p>
-                <small>
-                  Reported by {r.authorName} ·{" "}
-                  {new Date(r.createdAt).toLocaleDateString()} · {r.status}
-                </small>
-                <div className="report-footer">
-                  <button
-                    className="secondary compact"
-                    onClick={() => setActiveThread(r)}
-                    aria-label={`Open discussion for report: ${r.category}`}
-                  >
-                    <MessageCircle /> Discuss
-                  </button>
-                  <button
-                    className="secondary compact"
-                    onClick={() => handleShare(r)}
-                    aria-label={`Share report: ${r.category}`}
-                  >
-                    <Share2 /> Share
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))
-        )}
-      </section>
-      <footer>
-        Official records are shown with source attribution. AI helps find
-        candidates; it does not verify government facts.
-      </footer>
-      </main>
-      {activeThread && (
-        <CommentThread
-          report={activeThread}
-          currentUserId={currentUserId}
-          isModerator={isModerator}
-          onClose={() => setActiveThread(undefined)}
-        />
-      )}
-      {shareToast && (
-        <div className="share-toast" role="status" aria-live="polite">
-          {shareToast}
-        </div>
-      )}
-    </div>
-  );
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

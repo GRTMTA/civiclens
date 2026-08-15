@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import { LOGIN_PATH } from "./community-auth"
 import { CommunitySidebar } from "./community-sidebar"
 import type { SortOption, TopicId } from "./community-contract"
 
@@ -12,7 +13,9 @@ import type { SortOption, TopicId } from "./community-contract"
  * Prompt shown to residents browsing without an account.
  *
  * Discussion is readable anonymously, so this explains why the write controls
- * will not work rather than hiding the content behind a wall.
+ * will not work rather than hiding the content behind a wall. This is the one
+ * persistent sign-in call to action on the community surface — write controls
+ * elsewhere route guests into the same flow instead of repeating the button.
  */
 function SignInNotice() {
   return (
@@ -24,7 +27,7 @@ function SignInNotice() {
         </span>
       </p>
       <Button size="sm" variant="outline" asChild>
-        <a href="/login">Sign in</a>
+        <a href={LOGIN_PATH}>Sign in</a>
       </Button>
     </div>
   )

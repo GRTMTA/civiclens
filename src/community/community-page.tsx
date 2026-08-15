@@ -1,5 +1,6 @@
 import { useState } from "react"
 
+import { requestSignIn } from "./community-auth"
 import { CommunityFeed } from "./community-feed"
 import { CommunityRightRail } from "./community-right-rail"
 import { CommunityShell } from "./community-shell"
@@ -16,6 +17,18 @@ import { useCommunityFeed } from "./use-community"
 export function CommunityPage() {
   const feed = useCommunityFeed()
   const [composerOpen, setComposerOpen] = useState(false)
+
+  // Write actions are offered to everyone; a guest is sent through the existing
+  // login flow instead of being shown a second sign-in button. Clicks are
+  // ignored until the viewer resolves so a signed-in resident is never bounced
+  // to /login and straight back here.
+  const requireViewer = (action: () => void) => () => {
+    if (feed.canInteract) {
+      action()
+      return
+    }
+    if (feed.viewerReady) requestSignIn()
+  }
 
   return (
     <CommunityShell
@@ -38,8 +51,10 @@ export function CommunityPage() {
             onSearchChange={feed.setSearch}
             topic={feed.topic}
             onTopicChange={feed.setTopic}
-            onVote={feed.vote}
-            onCreatePost={() => setComposerOpen(true)}
+            onVote={(postId, direction) =>
+              requireViewer(() => feed.vote(postId, direction))()
+            }
+            onCreatePost={requireViewer(() => setComposerOpen(true))}
             onRetry={feed.retry}
             canInteract={feed.canInteract}
           />

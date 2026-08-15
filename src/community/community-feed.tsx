@@ -15,13 +15,7 @@ import {
 } from "./community-contract"
 import { PostCard } from "./post-card"
 
-function CommunityHeader({
-  onCreatePost,
-  canInteract,
-}: {
-  onCreatePost: () => void
-  canInteract: boolean
-}) {
+function CommunityHeader({ onCreatePost }: { onCreatePost: () => void }) {
   return (
     <header className="rounded-lg border border-border bg-card px-4 py-4 sm:px-5 sm:py-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -36,19 +30,16 @@ function CommunityHeader({
             Discuss public infrastructure, share observations, and learn from other residents.
           </p>
         </div>
-        {canInteract ? (
-          <Button size="lg" onClick={onCreatePost} className="shrink-0">
-            <Plus aria-hidden="true" />
-            Create Post
-          </Button>
-        ) : (
-          <Button size="lg" className="shrink-0" asChild>
-            <a href="/login">
-              <Plus aria-hidden="true" />
-              Sign in to post
-            </a>
-          </Button>
-        )}
+        {/*
+          Shown to guests as well: post creation is a core community
+          affordance, and the guest banner above already carries the single
+          sign-in call to action. Guests are routed through authentication by
+          the handler rather than by a second sign-in button here.
+        */}
+        <Button size="lg" onClick={onCreatePost} className="shrink-0">
+          <Plus aria-hidden="true" />
+          Create Post
+        </Button>
       </div>
     </header>
   )
@@ -201,13 +192,9 @@ function PostSkeleton() {
 /** Distinguishes "nothing here yet" from "nothing matches your filters". */
 function EmptyState({
   filtered,
-  canInteract,
-  onCreatePost,
   onClearFilters,
 }: {
   filtered: boolean
-  canInteract: boolean
-  onCreatePost: () => void
   onClearFilters: () => void
 }) {
   return (
@@ -224,24 +211,17 @@ function EmptyState({
           </Button>
         </>
       ) : (
+        /*
+          No action button here for either viewer: the hero's Create Post is
+          the single entry point, and the guest banner is the single sign-in
+          call to action.
+        */
         <>
           <IconMessages className="mx-auto size-6 text-muted-foreground" aria-hidden="true" />
           <p className="mt-3 text-sm font-medium">No discussions yet</p>
           <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
-            {canInteract
-              ? "Be the first to start a discussion about public infrastructure in your area."
-              : "Sign in to start the first discussion about public infrastructure in your area."}
+            Be the first to start a discussion about public infrastructure in your area.
           </p>
-          {canInteract ? (
-            <Button variant="outline" size="lg" className="mt-4" onClick={onCreatePost}>
-              <Plus aria-hidden="true" />
-              Create Post
-            </Button>
-          ) : (
-            <Button variant="outline" size="lg" className="mt-4" asChild>
-              <a href="/login">Sign in</a>
-            </Button>
-          )}
         </>
       )}
     </div>
@@ -286,7 +266,7 @@ export function CommunityFeed({
 
   return (
     <div className="space-y-3">
-      <CommunityHeader onCreatePost={onCreatePost} canInteract={canInteract} />
+      <CommunityHeader onCreatePost={onCreatePost} />
 
       {state === "unconfigured" ? (
         <div
@@ -335,12 +315,7 @@ export function CommunityFeed({
                 <PostSkeleton />
               </>
             ) : state === "error" && posts.length === 0 ? null : posts.length === 0 ? (
-              <EmptyState
-                filtered={filtered}
-                canInteract={canInteract}
-                onCreatePost={onCreatePost}
-                onClearFilters={clearFilters}
-              />
+              <EmptyState filtered={filtered} onClearFilters={clearFilters} />
             ) : (
               posts.map((post) => (
                 <PostCard

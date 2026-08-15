@@ -1,5 +1,6 @@
 import * as React from "react"
 import {
+  IconHome,
   IconMapPin,
   IconInnerShadowTop,
   IconUsersGroup,
@@ -19,14 +20,19 @@ import {
 const data = {
   navMain: [
     {
-      title: "Map",
-      url: "/map",
-      icon: IconMapPin,
+      title: "Home",
+      url: "/",
+      icon: IconHome,
     },
     {
       title: "Community",
       url: "/community",
       icon: IconUsersGroup,
+    },
+    {
+      title: "Explore Map",
+      url: "/map",
+      icon: IconMapPin,
     },
   ],
 }

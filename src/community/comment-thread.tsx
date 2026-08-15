@@ -240,14 +240,14 @@ export function CommentThread({
           onSubmit={(body) => onReply(body, null)}
         />
       ) : (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border bg-secondary/40 px-4 py-3.5">
-          <p className="text-sm text-muted-foreground">
-            Sign in to join this discussion.
-          </p>
-          <Button variant="outline" size="sm" asChild>
-            <a href="/login">Sign in</a>
-          </Button>
-        </div>
+        /*
+          Text only: the guest banner at the top of the page carries the single
+          sign-in call to action, and voting a comment routes a guest into the
+          same flow.
+        */
+        <p className="rounded-lg border border-dashed border-border bg-secondary/40 px-4 py-3.5 text-sm text-muted-foreground">
+          Sign in to join this discussion.
+        </p>
       )}
 
       <h2 className="text-sm font-semibold">

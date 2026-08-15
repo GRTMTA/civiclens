@@ -15,11 +15,15 @@ Without `GROQ_API_KEY`, scans use a safe demo analysis. Project records are load
 ## Architecture
 
 - `src`: React and Vite client using Supabase Auth, database, Storage, and Functions
+- `src/app-routes.ts`: paths the landing/auth bundle owns, plus the post-login destination
+- `src/community`: the `/community` and `/community/post/:postId` discussion surface
 - `supabase/migrations`: PostGIS schema, profile provisioning, RLS policies, and database functions
 - `supabase/functions/scan-project`: authenticated Groq image analysis and project matching
 - `supabase/seed.sql`: documents the external project-data import boundary
 
-Report photos are private and stored under the authenticated user's folder. Groq credentials are Edge Function secrets and must never use the `VITE_` prefix.
+Client routes are `/` (landing), `/login`, `/register`, `/map`, `/community`, and `/community/post/:postId`; anything else renders the not-found screen. Authentication returns residents to `/community`.
+
+Report photos are private and stored under the authenticated user's folder. Groq credentials are Edge Function secrets and must never use the `VITE_` prefix. The `scan-project` Edge Function remains deployed for image analysis, but no client screen calls it at present.
 
 ## DPWH dataset import
 
