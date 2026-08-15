@@ -32,8 +32,8 @@ import {
   type ReportItem,
   type CommentItem,
 } from "./supabase";
-import pristine from "./assests/city-pristine.png";
-import damaged from "./assests/city-damaged.png";
+import pristine from "./assets/city-pristine.png";
+import damaged from "./assets/city-damaged.png";
 import "./styles.css";
 import "./auth.css";
 
