@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Map as MapLibre,
   NavigationControl,
@@ -54,7 +54,7 @@ import {
   type ViewportResponse,
 } from "./map-contract"
 
-const PROJECT_LIST_PAGE_SIZE = 50
+const PROJECT_LIST_PAGE_SIZE = 10
 
 const DEFAULT_CAMERA: CameraState = {
   latitude: 10.3157,
@@ -77,10 +77,14 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
 }
 
 const STATUS_CLASSES: Record<DisplayStatus, string> = {
-  ongoing: "border-amber-300 bg-amber-50 text-amber-950",
-  completed: "border-emerald-300 bg-emerald-50 text-emerald-950",
-  planned: "border-indigo-300 bg-indigo-50 text-indigo-950",
-  unknown: "border-slate-300 bg-slate-100 text-slate-800",
+  ongoing:
+    "border-amber-500/40 bg-amber-500/10 text-amber-300 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300",
+  completed:
+    "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300",
+  planned:
+    "border-indigo-500/40 bg-indigo-500/10 text-indigo-300 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-300",
+  unknown:
+    "border-border bg-muted/40 text-muted-foreground",
 }
 
 const STATUS_DOT_CLASSES: Record<DisplayStatus, string> = {
@@ -172,6 +176,79 @@ function MapStatePanel({
   )
 }
 
+function PaginationBar({
+  page,
+  totalPages,
+  onPrev,
+  onNext,
+}: {
+  page: number
+  totalPages: number
+  onPrev: () => void
+  onNext: () => void
+}) {
+  if (totalPages <= 1) return null
+  // Show at most 5 page number buttons centred around the current page
+  const windowSize = 5
+  const half = Math.floor(windowSize / 2)
+  let start = Math.max(1, page - half)
+  const end = Math.min(totalPages, start + windowSize - 1)
+  start = Math.max(1, end - windowSize + 1)
+  const pages: ReactNode[] = []
+  for (let p = start; p <= end; p++) {
+    const isCurrent = p === page
+    pages.push(
+      <button
+        key={p}
+        type="button"
+        aria-label={`Page ${p}`}
+        aria-current={isCurrent ? "page" : undefined}
+        className={[
+          "flex h-7 min-w-[1.75rem] items-center justify-center rounded-md px-2 text-xs transition",
+          isCurrent
+            ? "bg-primary text-primary-foreground font-semibold"
+            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+        ].join(" ")}
+        onClick={() => {
+          if (!isCurrent) {
+            // Navigate to page p by invoking onPrev/onNext is not the right API;
+            // instead we expose a direct setPage via context. Since we can't pass
+            // it through here without refactoring, we calculate relative jumps:
+            const delta = p - page
+            if (delta > 0) for (let i = 0; i < delta; i++) onNext()
+            else for (let i = 0; i < -delta; i++) onPrev()
+          }
+        }}
+      >
+        {p}
+      </button>,
+    )
+  }
+  return (
+    <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+      <button
+        type="button"
+        disabled={page === 1}
+        onClick={onPrev}
+        aria-label="Previous page"
+        className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition hover:bg-muted/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      >
+        ← Prev
+      </button>
+      <div className="flex items-center gap-0.5">{pages}</div>
+      <button
+        type="button"
+        disabled={page === totalPages}
+        onClick={onNext}
+        aria-label="Next page"
+        className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition hover:bg-muted/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      >
+        Next →
+      </button>
+    </div>
+  )
+}
+
 function ProjectList({
   features,
   selectedId,
@@ -191,117 +268,134 @@ function ProjectList({
   queryError: string | null
   configurationRequired: boolean
 }) {
-  const [visibleCount, setVisibleCount] = useState(PROJECT_LIST_PAGE_SIZE)
-  const visibleFeatures = features.slice(0, visibleCount)
-  const hasMore = visibleFeatures.length < features.length
+  const [page, setPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(features.length / PROJECT_LIST_PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const start = (safePage - 1) * PROJECT_LIST_PAGE_SIZE
+  const visibleFeatures = features.slice(start, start + PROJECT_LIST_PAGE_SIZE)
 
+  // Reset to page 1 whenever the feature set changes (new viewport)
   useEffect(() => {
-    setVisibleCount(PROJECT_LIST_PAGE_SIZE)
+    setPage(1)
   }, [features])
 
+  const goNext = () => setPage((p) => Math.min(totalPages, p + 1))
+  const goPrev = () => setPage((p) => Math.max(1, p - 1))
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card">
-      <div className="flex items-start justify-between gap-3 border-b p-4">
-        <div>
-          <h2 className="font-heading text-base font-semibold">
+    // min-w-0 stops this flex child from blowing past its container's width
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border border-border bg-card">
+      <div className="flex min-w-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="font-heading text-sm font-semibold">
             Projects in this view
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Official records at documented project locations
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Official records at documented locations
           </p>
         </div>
-        <Badge variant="secondary" aria-label={`${features.length} projects returned`}>
+        <Badge
+          variant="secondary"
+          className="shrink-0 tabular-nums"
+          aria-label={`${features.length} projects returned`}
+        >
           {features.length}
         </Badge>
       </div>
+      {/* Alerts: wrapped in px-3 pt-3 so the Alert's w-full resolves against
+          the padded container — not the outer panel — preventing overflow */}
       {truncated && (
-        <Alert className="m-3 border-amber-300 bg-amber-50 text-amber-950">
-          <Info aria-hidden="true" />
-          <AlertTitle>Results are incomplete</AlertTitle>
-          <AlertDescription>
-            Zoom in to see more projects. Cluster counts represent returned
-            records, not every project in this area.
-          </AlertDescription>
-        </Alert>
+        <div className="px-3 pt-3">
+          <Alert className="border-warning/30 bg-warning/10 text-warning-foreground [&>svg]:text-warning">
+            <Info aria-hidden="true" />
+            <AlertTitle>Results are incomplete</AlertTitle>
+            <AlertDescription>
+              Zoom in to see more projects. Cluster counts represent returned
+              records, not every project in this area.
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
       {queryError && (
-        <Alert variant="destructive" className="m-3">
-          <AlertCircle aria-hidden="true" />
-          <AlertTitle>Project query unavailable</AlertTitle>
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-            <span>{queryError}</span>
-            <Button size="sm" variant="outline" onClick={onRetry}>
-              <RefreshCw aria-hidden="true" /> Retry
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <div className="px-3 pt-3">
+          <Alert variant="destructive">
+            <AlertCircle aria-hidden="true" />
+            <AlertTitle>Project query unavailable</AlertTitle>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+              <span>{queryError}</span>
+              <Button size="sm" variant="outline" onClick={onRetry}>
+                <RefreshCw aria-hidden="true" /> Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
       {configurationRequired && (
-        <Alert className="m-3 border-amber-300 bg-amber-50 text-amber-950">
-          <Info aria-hidden="true" />
-          <AlertTitle>Project data configuration required</AlertTitle>
-          <AlertDescription>
-            Configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to load project records.
-          </AlertDescription>
-        </Alert>
+        <div className="px-3 pt-3">
+          <Alert className="border-warning/30 bg-warning/10 text-warning-foreground [&>svg]:text-warning">
+            <Info aria-hidden="true" />
+            <AlertTitle>Project data configuration required</AlertTitle>
+            <AlertDescription>
+              Configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to load project records.
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto p-2" aria-live="polite">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2" aria-live="polite">
         {loading && features.length === 0 && (
           <div className="space-y-2 p-2" aria-label="Loading projects">
             {Array.from({ length: 5 }).map((_, index) => (
-              <Skeleton key={index} className="h-20 w-full" />
+              <Skeleton key={index} className="h-16 w-full" />
             ))}
           </div>
         )}
         {!loading && !queryError && !configurationRequired && features.length === 0 && (
           <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 p-5 text-center">
             <Search className="size-7 text-muted-foreground" aria-hidden="true" />
-            <p className="font-medium">No official projects in this view</p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm font-medium">No official projects in this view</p>
+            <p className="text-xs text-muted-foreground">
               Pan or zoom the map to browse another area.
             </p>
           </div>
         )}
-        <ul className="space-y-1" aria-label="Official projects">
+        <ul className="space-y-0.5" aria-label="Official projects">
           {visibleFeatures.map((feature) => (
             <li key={feature.id}>
               <button
                 type="button"
-                className="w-full rounded-lg border border-transparent p-3 text-left transition hover:border-border hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full min-w-0 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[selected=true]:border-primary/30 data-[selected=true]:bg-primary/10"
                 data-selected={selectedId === feature.id}
                 aria-current={selectedId === feature.id ? "true" : undefined}
                 onClick={() => onSelect(feature)}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <span className="line-clamp-2 text-sm font-medium">
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                  <span className="line-clamp-2 min-w-0 text-sm font-medium leading-snug">
                     {feature.name}
                   </span>
                   <StatusBadge status={feature.displayStatus} />
                 </div>
-                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="capitalize">{feature.category}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{feature.id}</span>
+                <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="shrink-0 capitalize">{feature.category}</span>
+                  <span aria-hidden="true" className="shrink-0 opacity-40">·</span>
+                  <span className="truncate opacity-60">{feature.id}</span>
                 </div>
               </button>
             </li>
           ))}
         </ul>
-        {hasMore && (
-          <Button
-            type="button"
-            variant="outline"
-            className="mt-2 w-full"
-            onClick={() => setVisibleCount((count) => count + PROJECT_LIST_PAGE_SIZE)}
-          >
-            Show {Math.min(PROJECT_LIST_PAGE_SIZE, features.length - visibleFeatures.length)} more
-          </Button>
-        )}
       </div>
-      <div className="border-t p-3 text-xs text-muted-foreground">
+      <PaginationBar
+        page={safePage}
+        totalPages={totalPages}
+        onPrev={goPrev}
+        onNext={goNext}
+      />
+      <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
         {loading && features.length > 0
           ? "Updating this area…"
-          : `Showing ${visibleFeatures.length} of ${features.length} returned`}
+          : features.length === 0
+            ? "No projects in this view"
+            : `Page ${safePage} of ${totalPages} · ${features.length} total`}
       </div>
     </div>
   )
@@ -839,9 +933,10 @@ export function ProjectMapSurface() {
   const mapUnavailable = mapStyleMissing || styleFailure
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+    // overflow-x-hidden: last-resort guard so no child causes horizontal page scroll
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden p-3 md:gap-4 md:p-4">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
             Source records
           </p>
@@ -852,15 +947,17 @@ export function ProjectMapSurface() {
             Browse source-attributed infrastructure records by documented project location.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
-          {queryState === "refreshing" && <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />}
-          {queryState === "loading"
-            ? "Loading visible projects…"
-            : queryState === "refreshing"
-              ? "Updating this area…"
-              : queryState === "configuration"
-                ? "Project data configuration required"
-                : "Map area ready"}
+        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
+          {queryState === "refreshing" && <RefreshCw className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />}
+          <span className="truncate">
+            {queryState === "loading"
+              ? "Loading visible projects…"
+              : queryState === "refreshing"
+                ? "Updating this area…"
+                : queryState === "configuration"
+                  ? "Configuration required"
+                  : "Map area ready"}
+          </span>
         </div>
       </div>
 
@@ -903,11 +1000,11 @@ export function ProjectMapSurface() {
             />
           )}
           {response.truncated && (
-            <div className="absolute left-3 right-3 top-3 z-10 rounded-lg border border-amber-300 bg-amber-50/95 px-3 py-2 text-xs text-amber-950 shadow-sm backdrop-blur-sm">
+            <div className="absolute left-3 right-3 top-3 z-10 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground shadow-sm backdrop-blur-sm">
               Results are incomplete. Zoom in to see more projects; cluster counts show returned records only.
             </div>
           )}
-          <div className="absolute bottom-3 left-3 z-10 hidden rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur-sm md:block">
+          <div className="absolute bottom-3 left-3 z-10 hidden rounded-lg border border-border bg-background/90 p-3 shadow-sm backdrop-blur-sm md:block">
             <div className="mb-2 text-xs font-medium">Status legend</div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
               {(Object.keys(STATUS_LABELS) as DisplayStatus[]).map((status) => (
@@ -944,33 +1041,39 @@ export function ProjectMapSurface() {
       </div>
 
       <div className="flex items-center justify-between gap-2 lg:hidden">
-        <Button variant="outline" onClick={() => setListOpen(true)}>
-          <Search aria-hidden="true" /> Projects in this view
-          <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs">{response.features.length}</span>
+        <Button variant="outline" className="min-w-0 shrink" onClick={() => setListOpen(true)}>
+          <Search className="shrink-0" aria-hidden="true" />
+          <span className="truncate">Projects in this view</span>
+          <span className="ml-1 shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs">{response.features.length}</span>
         </Button>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <LocateFixed aria-hidden="true" /> Cebu City view
+        <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+          <LocateFixed className="shrink-0" aria-hidden="true" /> Cebu City view
         </div>
       </div>
 
       <Sheet open={listOpen} onOpenChange={setListOpen}>
-        <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-2xl p-0">
-          <SheetHeader className="border-b">
+        {/* max-h-[90dvh]: more room on small phones; flex-col + overflow-hidden
+            keeps the sheet itself from becoming wider than the viewport */}
+        <SheetContent side="bottom" className="flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-t-2xl p-0">
+          {/* px-4 py-3 instead of the default p-6 saves 24px on narrow screens */}
+          <SheetHeader className="shrink-0 border-b px-4 py-3">
             <SheetTitle>Projects in this view</SheetTitle>
             <SheetDescription>
               Select an official record from the current map area.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex min-h-0 h-[55dvh] p-3">
+          {/* flex-1 + min-h-0: fills remaining sheet height so ProjectList
+              can scroll; overflow-hidden guards against inner overflow */}
+          <div className="flex min-h-0 flex-1 overflow-hidden p-3">
             <ProjectList
               features={response.features}
               selectedId={selectedId}
-            loading={queryState === "loading" || queryState === "refreshing"}
+              loading={queryState === "loading" || queryState === "refreshing"}
               truncated={response.truncated}
               onSelect={selectProject}
-            onRetry={() => void loadViewport(lastBoundsRef.current)}
-            queryError={queryError}
-            configurationRequired={queryState === "configuration"}
+              onRetry={() => void loadViewport(lastBoundsRef.current)}
+              queryError={queryError}
+              configurationRequired={queryState === "configuration"}
             />
           </div>
         </SheetContent>
