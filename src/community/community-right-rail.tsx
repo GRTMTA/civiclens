@@ -1,4 +1,5 @@
-import { listTopics, type TopicId } from "./community-contract"
+import { CommunityPulsePanel } from "./community-pulse"
+import { listTopics, type CommunityPulse, type TopicId } from "./community-contract"
 import { TopicChip } from "./topic-chip"
 
 const POPULAR_TOPICS: TopicId[] = [
@@ -40,9 +41,13 @@ function RailPanel({
 export function CommunityRightRail({
   topic,
   onTopicChange,
+  pulse = null,
+  pulseLoading = false,
 }: {
   topic: TopicId | null
   onTopicChange: (topic: TopicId | null) => void
+  pulse?: CommunityPulse | null
+  pulseLoading?: boolean
 }) {
   const labels = new Map(listTopics().map((item) => [item.id, item.label]))
 
@@ -50,8 +55,8 @@ export function CommunityRightRail({
     <aside aria-label="About this community" className="space-y-3">
       <RailPanel title="About CivicLens Community">
         <p className="text-sm leading-6 text-muted-foreground">
-          CivicLens Community is a space for residents to discuss public infrastructure, share
-          observations, and exchange local knowledge.
+          CivicLens Community is where residents add context to public infrastructure records:
+          discussion, local knowledge, and observations of what they have seen.
         </p>
         <p className="mt-3 text-xs leading-5 text-muted-foreground">
           Discussion here is resident content. Official project records are shown separately on the{" "}
@@ -63,6 +68,10 @@ export function CommunityRightRail({
           </a>
           , with their source attribution.
         </p>
+      </RailPanel>
+
+      <RailPanel title="Community Pulse">
+        <CommunityPulsePanel pulse={pulse} loading={pulseLoading} />
       </RailPanel>
 
       <RailPanel title="Popular Topics">

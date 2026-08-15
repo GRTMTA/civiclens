@@ -2,6 +2,7 @@ import { useCallback, useState } from "react"
 import { IconChevronRight } from "@tabler/icons-react"
 import { ArrowLeft } from "lucide-react"
 
+import { Avatar } from "@/components/avatar"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CommentThread } from "./comment-thread"
@@ -9,10 +10,13 @@ import { requestSignIn } from "./community-auth"
 import { CommunityRightRail } from "./community-right-rail"
 import { CommunityShell } from "./community-shell"
 import { relativeTime, type SortOption, type TopicId } from "./community-contract"
+import { profilePath } from "./community-routes"
+import { MediaGallery } from "./media-gallery"
 import { PostActions } from "./post-actions"
+import { AreaLabel, PostKindBadge } from "./post-kind-badge"
 import { ProjectContextChip } from "./project-context-chip"
 import { TopicChip } from "./topic-chip"
-import { usePostThread } from "./use-community"
+import { useCommunityPulse, usePostThread } from "./use-community"
 import { VoteControl } from "./vote-control"
 
 const COMPOSER_ID = "post-reply-composer"
@@ -61,6 +65,8 @@ function NotFound() {
  */
 export function PostDetailPage({ postId }: { postId: string }) {
   const thread = usePostThread(postId)
+  // Community activity for this discussion's project, when it references one.
+  const pulse = useCommunityPulse(thread.post?.project?.id ?? null)
   // The shell's sort/topic controls navigate back to the feed from here.
   const [sort, setSort] = useState<SortOption>("popular")
 
@@ -120,9 +126,12 @@ export function PostDetailPage({ postId }: { postId: string }) {
       onSortChange={onSortChange}
       topic={null}
       onTopicChange={onTopicChange}
-      showSignInNotice={
+      showGuestNote={
         thread.viewerReady && !thread.canInteract && thread.state !== "unconfigured"
       }
+      viewer={thread.viewer}
+      viewerReady={thread.viewerReady}
+      onSignOut={thread.signOut}
     >
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_19rem] xl:gap-5">
         <main className="min-w-0 space-y-3">
@@ -153,62 +162,92 @@ export function PostDetailPage({ postId }: { postId: string }) {
           ) : (
             <>
               <article className="rounded-lg border border-border bg-card p-3 sm:p-5">
-                <div className="flex gap-2 sm:gap-3">
-                  <div className="pt-0.5">
-                    <VoteControl
-                      score={post.score}
-                      vote={post.viewerVote}
-                      onVote={(direction) => requireViewer(() => thread.votePost(direction))}
-                      label={post.title}
-                      canInteract={thread.canInteract}
-                    />
-                  </div>
+                {/* AUTHOR */}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <Avatar name={post.author.name} url={post.author.avatarUrl} size="sm" />
+                  {post.author.username ? (
+                    <a
+                      href={profilePath(post.author.username)}
+                      className="rounded-sm font-medium text-foreground/80 underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+                    >
+                      {post.authorName}
+                    </a>
+                  ) : (
+                    <span className="font-medium text-foreground/80">{post.authorName}</span>
+                  )}
+                  <span aria-hidden="true">·</span>
+                  <time
+                    dateTime={post.createdAt}
+                    title={new Date(post.createdAt).toLocaleString()}
+                  >
+                    {relativeTime(post.createdAt)}
+                  </time>
+                  <PostKindBadge kind={post.kind} className="ml-0.5" />
+                </div>
 
-                  <div className="min-w-0 flex-1">
-                    <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground/75">{post.authorName}</span>
-                      <span aria-hidden="true">·</span>
-                      <time
-                        dateTime={post.createdAt}
-                        title={new Date(post.createdAt).toLocaleString()}
-                      >
-                        {relativeTime(post.createdAt)}
-                      </time>
-                      <span aria-hidden="true">·</span>
-                      <span>community discussion</span>
+                {/* PROJECT — stated before the discussion itself. */}
+                {post.project && (
+                  <div className="mt-3">
+                    <p className="text-[0.65rem] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                      Project
                     </p>
-
-                    <h2 className="mt-2 text-lg leading-snug font-semibold tracking-[-0.015em] sm:text-xl">
-                      {post.title}
-                    </h2>
-
-                    {post.body && (
-                      <p className="mt-2.5 text-sm leading-7 whitespace-pre-line text-foreground/85">
-                        {post.body}
-                      </p>
-                    )}
-
-                    <div className="mt-3.5 flex flex-wrap items-center gap-1.5">
-                      <TopicChip topic={post.topic} />
-                      {post.project && <ProjectContextChip project={post.project} />}
-                    </div>
-
-                    {post.project && (
-                      <p className="mt-2.5 text-xs leading-5 text-muted-foreground">
-                        This is a resident discussion about that project record. It is not part of
-                        the official record, and nothing here is a verified finding.
-                      </p>
-                    )}
-
-                    <PostActions
-                      postId={post.id}
-                      title={post.title}
-                      commentCount={thread.commentCount}
-                      className="mt-3 -ml-1"
-                      commentsAsLink={false}
-                      onCommentsClick={focusComposer}
-                    />
+                    <ProjectContextChip project={post.project} className="mt-1" />
                   </div>
+                )}
+
+                {/* DISCUSSION / OBSERVATION */}
+                <h2 className="mt-3 text-lg leading-snug font-semibold tracking-[-0.015em] sm:text-xl">
+                  {post.title}
+                </h2>
+
+                {post.body && (
+                  <p className="mt-2.5 text-sm leading-7 whitespace-pre-line text-foreground/85">
+                    {post.body}
+                  </p>
+                )}
+
+                {post.areaLabel && <AreaLabel area={post.areaLabel} className="mt-3" />}
+
+                {/* MEDIA */}
+                <MediaGallery
+                  media={post.media}
+                  className="mt-3.5"
+                  label={
+                    post.kind === "observation"
+                      ? "Resident observation photo"
+                      : "Resident photo"
+                  }
+                />
+
+                <div className="mt-3.5 flex flex-wrap items-center gap-1.5">
+                  <TopicChip topic={post.topic} />
+                </div>
+
+                {post.project && (
+                  <p className="mt-2.5 text-xs leading-5 text-muted-foreground">
+                    This is resident discussion about that project record. It is not part of the
+                    official record, and nothing here is a verified finding.
+                  </p>
+                )}
+
+                {/* COMMUNITY RESPONSE */}
+                <div className="mt-3 flex flex-wrap items-center gap-1">
+                  <VoteControl
+                    score={post.score}
+                    vote={post.viewerVote}
+                    onVote={(direction) => requireViewer(() => thread.votePost(direction))}
+                    label={post.title}
+                    orientation="horizontal"
+                    size="sm"
+                    canInteract={thread.canInteract}
+                  />
+                  <PostActions
+                    postId={post.id}
+                    title={post.title}
+                    commentCount={thread.commentCount}
+                    commentsAsLink={false}
+                    onCommentsClick={focusComposer}
+                  />
                 </div>
               </article>
 
@@ -218,7 +257,9 @@ export function PostDetailPage({ postId }: { postId: string }) {
                 onVote={(commentId, direction) =>
                   requireViewer(() => thread.voteComment(commentId, direction))
                 }
-                onReply={thread.addComment}
+                onReply={(body, parentId, photo) =>
+                  thread.addComment(body, parentId, photo)
+                }
                 composerId={COMPOSER_ID}
                 canInteract={thread.canInteract}
               />
@@ -228,7 +269,16 @@ export function PostDetailPage({ postId }: { postId: string }) {
 
         <div className="hidden min-w-0 xl:block">
           <div className="sticky top-[calc(var(--header-height)+1.25rem)]">
-            <CommunityRightRail topic={null} onTopicChange={onTopicChange} />
+            {/*
+              Scoped to this discussion's project when it has one, so the rail
+              answers "what else has the community said about this record?".
+            */}
+            <CommunityRightRail
+              topic={null}
+              onTopicChange={onTopicChange}
+              pulse={pulse.pulse}
+              pulseLoading={pulse.state === "loading"}
+            />
           </div>
         </div>
       </div>

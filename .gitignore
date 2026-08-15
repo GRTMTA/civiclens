@@ -4,6 +4,7 @@ dist
 .env.*
 !.env.example
 supabase/.temp
+supabase/.branches
 *.tsbuildinfo
 coverage
 data/raw/

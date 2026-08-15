@@ -16,14 +16,48 @@ Without `GROQ_API_KEY`, scans use a safe demo analysis. Project records are load
 
 - `src`: React and Vite client using Supabase Auth, database, Storage, and Functions
 - `src/app-routes.ts`: paths the landing/auth bundle owns, plus the post-login destination
-- `src/community`: the `/community` and `/community/post/:postId` discussion surface
+- `src/community`: the `/community`, `/community/post/:postId`, and `/community/profile/:username` surface
+- `src/components/auth-menu.tsx`: the single persistent authentication control, used by both shells
+- `src/map`: the official project map, including the community context and timeline sections
 - `supabase/migrations`: PostGIS schema, profile provisioning, RLS policies, and database functions
 - `supabase/functions/scan-project`: authenticated Groq image analysis and project matching
-- `supabase/seed.sql`: documents the external project-data import boundary
+- `supabase/seed.sql`: local-only demo community content (see below)
 
-Client routes are `/` (landing), `/login`, `/register`, `/map`, `/community`, and `/community/post/:postId`; anything else renders the not-found screen. Authentication returns residents to `/community`.
+Client routes are `/` (landing), `/login`, `/register`, `/map`, `/community`, `/community/post/:postId`, and `/community/profile/:username`; anything else renders the not-found screen. Authentication returns residents to `/community`.
 
 Report photos are private and stored under the authenticated user's folder. Groq credentials are Edge Function secrets and must never use the `VITE_` prefix. The `scan-project` Edge Function remains deployed for image analysis, but no client screen calls it at present.
+
+## Community context layer
+
+Community is a context layer around Official-source project records, not a standalone discussion board. The distinction is enforced in both the schema and the UI:
+
+| Concept | Source | Where it lives |
+| --- | --- | --- |
+| Official-source record | Government data (DPWH snapshot) | `public.projects`, the map |
+| Community discussion | Resident content | `community_posts` with `kind = 'discussion'` |
+| Resident observation | A resident's dated account of something seen | `community_posts` with `kind = 'observation'` |
+| Supporting photos | Resident-supplied | `community_post_media`, `community_comment_media` |
+
+Resident content may *reference* a project, but it never verifies, amends, or invalidates the official record. `community_pulse` aggregates are labelled as discussion activity, never as project condition. Observations carry an optional approximate `area_label` (e.g. a barangay) and store no coordinates, so an exact capture point is never published.
+
+Navigation runs both ways: a post's project chip opens `/map?project=<id>`, and a project's community section opens `/community?project=<id>`.
+
+Community media buckets (`avatars`, `community-post-media`, `community-comment-media`) are public so guests can see photos in the discussion they browse; writes are owner-only through storage policies. The `report-photos` bucket stays private.
+
+### Demo content
+
+`supabase/seed.sql` seeds fictional residents and discussion so `/community` is evaluable before a DPWH import. It runs on `supabase db reset` and skips itself if any community content already exists. It is local-only: it creates auth users at `example.invalid`. Do not apply it to a shared project.
+
+### Verifying against a local database
+
+```bash
+supabase start
+supabase db reset
+node --experimental-strip-types scripts/verify-community.ts       # anonymous browsing + guest guards
+node --experimental-strip-types scripts/verify-community-auth.ts  # posting, media, profiles, voting
+```
+
+Both scripts need a running local stack and exit non-zero on failure. They are excluded from `npm test`, which stays offline.
 
 ## DPWH dataset import
 

@@ -6,13 +6,18 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import {
+  POST_KIND_LABELS,
+  POST_KINDS,
   SORT_LABELS,
   SORT_OPTIONS,
   topicLabel,
   type CommunityPost,
+  type PostKind,
+  type ProjectReference,
   type SortOption,
   type TopicId,
 } from "./community-contract"
+import { projectMapPath } from "./community-routes"
 import { PostCard } from "./post-card"
 
 function CommunityHeader({ onCreatePost }: { onCreatePost: () => void }) {
@@ -27,12 +32,13 @@ function CommunityHeader({ onCreatePost }: { onCreatePost: () => void }) {
             CivicLens Community
           </h1>
           <p className="mt-1.5 max-w-xl text-sm leading-6 text-muted-foreground">
-            Discuss public infrastructure, share observations, and learn from other residents.
+            Discuss public infrastructure, share resident observations, and learn from local
+            experience.
           </p>
         </div>
         {/*
           Shown to guests as well: post creation is a core community
-          affordance, and the guest banner above already carries the single
+          affordance, and the header's account control carries the single
           sign-in call to action. Guests are routed through authentication by
           the handler rather than by a second sign-in button here.
         */}
@@ -42,6 +48,40 @@ function CommunityHeader({ onCreatePost }: { onCreatePost: () => void }) {
         </Button>
       </div>
     </header>
+  )
+}
+
+/**
+ * Banner shown when the feed is scoped to one Official-source record.
+ *
+ * Makes the Community → Project → Official data path explicit and reversible.
+ */
+function ProjectScopeBanner({
+  project,
+  onClear,
+}: {
+  project: ProjectReference
+  onClear: () => void
+}) {
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary/10 px-4 py-3">
+      <p className="text-[0.65rem] font-semibold tracking-[0.12em] text-primary uppercase">
+        Community activity for project
+      </p>
+      <p className="mt-1 text-sm font-medium">{project.name}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" asChild>
+          <a href={projectMapPath(project.id)}>View official project record</a>
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onClear}>
+          <X aria-hidden="true" />
+          Show all discussions
+        </Button>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+        Resident discussion about this record. It is not part of the official record.
+      </p>
+    </div>
   )
 }
 
@@ -107,6 +147,8 @@ function FeedControls({
   onSearchChange,
   topic,
   onTopicChange,
+  kind,
+  onKindChange,
 }: {
   sort: SortOption
   onSortChange: (sort: SortOption) => void
@@ -114,6 +156,8 @@ function FeedControls({
   onSearchChange: (search: string) => void
   topic: TopicId | null
   onTopicChange: (topic: TopicId | null) => void
+  kind: PostKind | null
+  onKindChange: (kind: PostKind | null) => void
 }) {
   return (
     <div className="rounded-lg border border-border bg-card px-2.5 py-2.5">
@@ -149,6 +193,44 @@ function FeedControls({
           })}
         </div>
         <SearchField value={search} onChange={onSearchChange} />
+      </div>
+
+      {/* Post kind is a CivicLens-specific filter, so it sits beside sorting. */}
+      <div
+        role="group"
+        aria-label="Filter by content type"
+        className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5"
+      >
+        <span className="mr-0.5 text-xs text-muted-foreground">Showing</span>
+        <button
+          type="button"
+          aria-pressed={kind === null}
+          onClick={() => onKindChange(null)}
+          className={cn(
+            "rounded-md border border-border px-2.5 py-1 text-xs font-medium transition-colors duration-150 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-ring/60",
+            kind === null ? "border-primary/60 bg-primary/15 text-foreground" : "text-foreground/80",
+          )}
+        >
+          Everything
+        </button>
+        {POST_KINDS.map((option) => {
+          const active = kind === option
+          return (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onKindChange(active ? null : option)}
+              className={cn(
+                "rounded-md border border-border px-2.5 py-1 text-xs font-medium transition-colors duration-150 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-ring/60",
+                active ? "border-primary/60 bg-primary/15 text-foreground" : "text-foreground/80",
+              )}
+            >
+              {option === "observation" ? "Observations" : "Discussions"}
+              <span className="sr-only"> — {POST_KIND_LABELS[option]}</span>
+            </button>
+          )
+        })}
       </div>
 
       {topic && (
@@ -192,9 +274,11 @@ function PostSkeleton() {
 /** Distinguishes "nothing here yet" from "nothing matches your filters". */
 function EmptyState({
   filtered,
+  onCreatePost,
   onClearFilters,
 }: {
   filtered: boolean
+  onCreatePost: () => void
   onClearFilters: () => void
 }) {
   return (
@@ -212,9 +296,9 @@ function EmptyState({
         </>
       ) : (
         /*
-          No action button here for either viewer: the hero's Create Post is
-          the single entry point, and the guest banner is the single sign-in
-          call to action.
+          `Create Post` here, never a sign-in button: the header's account
+          control is the single sign-in call to action, and a guest pressing
+          this is routed through authentication by the handler.
         */
         <>
           <IconMessages className="mx-auto size-6 text-muted-foreground" aria-hidden="true" />
@@ -222,6 +306,10 @@ function EmptyState({
           <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
             Be the first to start a discussion about public infrastructure in your area.
           </p>
+          <Button variant="outline" size="lg" className="mt-4" onClick={onCreatePost}>
+            <Plus aria-hidden="true" />
+            Create Post
+          </Button>
         </>
       )}
     </div>
@@ -238,6 +326,10 @@ export function CommunityFeed({
   onSearchChange,
   topic,
   onTopicChange,
+  kind,
+  onKindChange,
+  scopedProject,
+  onClearProject,
   onVote,
   onCreatePost,
   onRetry,
@@ -252,21 +344,31 @@ export function CommunityFeed({
   onSearchChange: (search: string) => void
   topic: TopicId | null
   onTopicChange: (topic: TopicId | null) => void
+  kind: PostKind | null
+  onKindChange: (kind: PostKind | null) => void
+  /** Set when the feed is filtered to one Official-source record. */
+  scopedProject: ProjectReference | null
+  onClearProject: () => void
   onVote: (postId: string, direction: 1 | -1) => void
   onCreatePost: () => void
   onRetry: () => void
   canInteract: boolean
 }) {
-  const filtered = search.trim().length > 0 || topic !== null
+  const filtered = search.trim().length > 0 || topic !== null || kind !== null
 
   const clearFilters = () => {
     onSearchChange("")
     onTopicChange(null)
+    onKindChange(null)
   }
 
   return (
     <div className="space-y-3">
       <CommunityHeader onCreatePost={onCreatePost} />
+
+      {scopedProject && (
+        <ProjectScopeBanner project={scopedProject} onClear={onClearProject} />
+      )}
 
       {state === "unconfigured" ? (
         <div
@@ -287,6 +389,8 @@ export function CommunityFeed({
             onSearchChange={onSearchChange}
             topic={topic}
             onTopicChange={onTopicChange}
+            kind={kind}
+            onKindChange={onKindChange}
           />
 
           {error && (
@@ -315,7 +419,11 @@ export function CommunityFeed({
                 <PostSkeleton />
               </>
             ) : state === "error" && posts.length === 0 ? null : posts.length === 0 ? (
-              <EmptyState filtered={filtered} onClearFilters={clearFilters} />
+              <EmptyState
+                filtered={filtered}
+                onCreatePost={onCreatePost}
+                onClearFilters={clearFilters}
+              />
             ) : (
               posts.map((post) => (
                 <PostCard

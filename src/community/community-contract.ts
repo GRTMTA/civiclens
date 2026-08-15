@@ -51,6 +51,22 @@ export function listTopics(): Topic[] {
 }
 
 /**
+ * How a resident framed their post.
+ *
+ * `discussion` is open conversation. `observation` is a resident's dated
+ * account of something they personally saw — supporting material, never a
+ * verified finding about an Official-source record.
+ */
+export const POST_KINDS = ["discussion", "observation"] as const
+
+export type PostKind = (typeof POST_KINDS)[number]
+
+export const POST_KIND_LABELS: Record<PostKind, string> = {
+  discussion: "Discussion",
+  observation: "Resident observation",
+}
+
+/**
  * A minimal, display-only pointer to an Official-source record.
  *
  * It carries just enough to render a project context chip and link into the
@@ -62,12 +78,34 @@ export type ProjectReference = {
   name: string
 }
 
+/** Public identity of a resident, as other residents see them. */
+export type Author = {
+  name: string
+  /** Handle for `/community/profile/:username`. Absent on legacy content. */
+  username: string | null
+  /** Storage path; kept for reference alongside the resolved URL. */
+  avatarPath: string | null
+  /** Resolved public URL, or null when the resident has no avatar. */
+  avatarUrl: string | null
+}
+
+/** Resident-supplied supporting photo. */
+export type MediaItem = {
+  id: string
+  /** Storage object path. */
+  path: string
+  /** Resolved public URL for rendering. */
+  url: string
+}
+
 export type CommunityPost = {
   id: string
+  kind: PostKind
   title: string
   /** Optional discussion body. Plain text; rendered as text, never as HTML. */
   body: string
   authorName: string
+  author: Author
   createdAt: string
   topic: TopicId
   /** Net score from resident votes. */
@@ -77,6 +115,12 @@ export type CommunityPost = {
   viewerVote: VoteState
   /** Present when the resident chose to relate the discussion to a project. */
   project: ProjectReference | null
+  /**
+   * Approximate area a resident gave for an observation (e.g. a barangay).
+   * Never a precise capture point — exact locations are not published.
+   */
+  areaLabel: string | null
+  media: MediaItem[]
 }
 
 export type CommunityComment = {
@@ -85,10 +129,12 @@ export type CommunityComment = {
   /** Null for a top-level comment, otherwise the parent comment id. */
   parentId: string | null
   authorName: string
+  author: Author
   body: string
   createdAt: string
   score: number
   viewerVote: VoteState
+  media: MediaItem[]
 }
 
 /** A comment plus its nested replies, ready for threaded rendering. */
@@ -97,16 +143,62 @@ export type CommentNode = CommunityComment & {
 }
 
 export type NewPostInput = {
+  kind: PostKind
   title: string
   body: string
   topic: TopicId
   projectId: string | null
+  /** Approximate area for an observation; ignored for a discussion. */
+  areaLabel: string | null
+  /** Photos chosen in the composer, uploaded after the post row exists. */
+  photos: File[]
 }
 
 export type NewCommentInput = {
   postId: string
   parentId: string | null
   body: string
+  photo?: File | null
+}
+
+/** Aggregate community activity. Describes discussion, never project condition. */
+export type CommunityPulse = {
+  discussions: number
+  observations: number
+  photos: number
+  comments: number
+  lastActivityAt: string | null
+  topics: { topic: TopicId; count: number }[]
+}
+
+/** One recent piece of community activity about a project. */
+export type ProjectActivityItem = {
+  postId: string
+  kind: PostKind
+  title: string
+  excerpt: string
+  authorName: string
+  createdAt: string
+  photoCount: number
+}
+
+/** A resident's public profile and their community activity counts. */
+export type CommunityProfile = {
+  username: string
+  displayName: string
+  bio: string
+  avatarPath: string | null
+  avatarUrl: string | null
+  joinedAt: string
+  postCount: number
+  observationCount: number
+  commentCount: number
+}
+
+export type ProfileEdit = {
+  displayName: string
+  username: string
+  bio: string
 }
 
 export const SORT_OPTIONS = ["popular", "new", "discussed"] as const
@@ -123,6 +215,12 @@ export type FeedQuery = {
   sort: SortOption
   search: string
   topic: TopicId | null
+  /** Restricts the feed to discussion about one Official-source record. */
+  projectId: string | null
+  /** Restricts the feed to one post kind. */
+  kind: PostKind | null
+  /** Restricts the feed to one resident's content, by handle. */
+  author: string | null
 }
 
 /**
@@ -193,13 +291,32 @@ export function formatScore(score: number): string {
 // client-side. `FeedQuery` above is the shape passed through to it.
 
 export type PostValidationError = {
-  field: "title" | "body"
+  field: "title" | "body" | "area" | "photos"
   message: string
 }
 
 export const POST_TITLE_MAX = 160
 export const POST_BODY_MAX = 4000
 export const COMMENT_BODY_MAX = 1000
+export const AREA_LABEL_MAX = 120
+
+/** Kept in step with the storage bucket limits in the community migration. */
+export const POST_PHOTO_MAX = 4
+export const COMMENT_PHOTO_MAX = 1
+export const PHOTO_BYTES_MAX = 5 * 1024 * 1024
+export const AVATAR_BYTES_MAX = 2 * 1024 * 1024
+export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const
+
+/** Validates one chosen image against the bucket's type and size rules. */
+export function validateImage(file: File, maxBytes = PHOTO_BYTES_MAX): string | null {
+  if (!ACCEPTED_IMAGE_TYPES.includes(file.type as (typeof ACCEPTED_IMAGE_TYPES)[number])) {
+    return `${file.name} is not a JPEG, PNG, or WebP image.`
+  }
+  if (file.size > maxBytes) {
+    return `${file.name} is larger than ${Math.round(maxBytes / (1024 * 1024))}MB.`
+  }
+  return null
+}
 
 export function validateNewPost(input: NewPostInput): PostValidationError | null {
   const title = input.title.trim()
@@ -212,5 +329,50 @@ export function validateNewPost(input: NewPostInput): PostValidationError | null
   if (input.body.trim().length > POST_BODY_MAX) {
     return { field: "body", message: `Posts are limited to ${POST_BODY_MAX} characters.` }
   }
+  if ((input.areaLabel ?? "").trim().length > AREA_LABEL_MAX) {
+    return { field: "area", message: `Area is limited to ${AREA_LABEL_MAX} characters.` }
+  }
+  if (input.photos.length > POST_PHOTO_MAX) {
+    return { field: "photos", message: `You can attach up to ${POST_PHOTO_MAX} photos.` }
+  }
+  for (const photo of input.photos) {
+    const invalid = validateImage(photo)
+    if (invalid) return { field: "photos", message: invalid }
+  }
   return null
+}
+
+export const USERNAME_PATTERN = /^[a-z0-9_]{3,20}$/
+
+/** Mirrors the `profiles_username_format` constraint in the database. */
+export function validateProfile(edit: ProfileEdit): { field: keyof ProfileEdit; message: string } | null {
+  const displayName = edit.displayName.trim()
+  if (displayName.length < 1 || displayName.length > 80) {
+    return { field: "displayName", message: "Display name must be between 1 and 80 characters." }
+  }
+  if (!USERNAME_PATTERN.test(edit.username.trim().toLowerCase())) {
+    return {
+      field: "username",
+      message: "Username must be 3-20 characters using lowercase letters, numbers, or underscore.",
+    }
+  }
+  if (edit.bio.trim().length > 280) {
+    return { field: "bio", message: "Bio is limited to 280 characters." }
+  }
+  return null
+}
+
+/** Absolute date for a profile join line, e.g. "August 2026". */
+export function joinedLabel(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.valueOf())) return ""
+  return date.toLocaleDateString("en-PH", { year: "numeric", month: "long" })
+}
+
+/** Initials fallback for an avatar with no uploaded image. */
+export function initialsFor(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return "R"
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
 }

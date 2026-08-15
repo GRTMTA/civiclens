@@ -1,13 +1,18 @@
-import { useId, useState } from "react"
-import { Loader2, MessageSquare, Share2 } from "lucide-react"
+import { useId, useRef, useState } from "react"
+import { ImagePlus, Loader2, MessageSquare, Share2 } from "lucide-react"
 
+import { Avatar } from "@/components/avatar"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
+  ACCEPTED_IMAGE_TYPES,
   COMMENT_BODY_MAX,
   relativeTime,
+  validateImage,
   type CommentNode,
 } from "./community-contract"
+import { profilePath } from "./community-routes"
+import { MediaGallery, MediaPreviewList } from "./media-gallery"
 import { VoteControl } from "./vote-control"
 
 const MAX_INDENT_DEPTH = 5
@@ -26,13 +31,29 @@ function ReplyComposer({
   submitLabel: string
   autoFocus?: boolean
   onCancel?: () => void
-  onSubmit: (body: string) => Promise<void>
+  onSubmit: (body: string, photo: File | null) => Promise<void>
   composerId?: string
 }) {
   const fieldId = useId()
   const [body, setBody] = useState("")
+  const [photo, setPhoto] = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
+
+  const choosePhoto = (files: FileList | null) => {
+    const file = files?.[0]
+    if (!file) return
+    const invalid = validateImage(file)
+    if (invalid) {
+      setError(invalid)
+      return
+    }
+    setPhoto(file)
+    setError(null)
+    // Reset so choosing the same file again still fires a change event.
+    if (photoInputRef.current) photoInputRef.current.value = ""
+  }
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -44,8 +65,9 @@ function ReplyComposer({
     setError(null)
     setSubmitting(true)
     try {
-      await onSubmit(trimmed)
+      await onSubmit(trimmed, photo)
       setBody("")
+      setPhoto(null)
       onCancel?.()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Your reply could not be posted.")
@@ -70,10 +92,37 @@ function ReplyComposer({
         aria-describedby={error ? `${fieldId}-error` : undefined}
         className="w-full resize-y rounded-lg border border-border bg-input/60 px-3 py-2 text-sm leading-6 text-foreground transition-colors duration-150 outline-none placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
       />
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-[0.7rem] text-muted-foreground tabular-nums">
-          {body.trim().length}/{COMMENT_BODY_MAX}
-        </span>
+
+      <MediaPreviewList
+        files={photo ? [photo] : []}
+        uploading={submitting}
+        onRemove={() => setPhoto(null)}
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept={ACCEPTED_IMAGE_TYPES.join(",")}
+            className="sr-only"
+            id={`${fieldId}-photo`}
+            onChange={(event) => choosePhoto(event.target.files)}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={photo !== null || submitting}
+            onClick={() => photoInputRef.current?.click()}
+          >
+            <ImagePlus aria-hidden="true" />
+            Add photo
+          </Button>
+          <span className="text-[0.7rem] text-muted-foreground tabular-nums">
+            {body.trim().length}/{COMMENT_BODY_MAX}
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           {onCancel && (
             <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
@@ -105,12 +154,13 @@ function Comment({
   comment: CommentNode
   depth: number
   onVote: (commentId: string, direction: 1 | -1) => void
-  onReply: (body: string, parentId: string) => Promise<void>
+  onReply: (body: string, parentId: string, photo: File | null) => Promise<void>
   canInteract: boolean
 }) {
   const [replying, setReplying] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const replyCount = comment.replies.length
+  const authorHref = comment.author.username ? profilePath(comment.author.username) : null
 
   return (
     <li
@@ -120,8 +170,18 @@ function Comment({
       )}
     >
       <article className="min-w-0">
-        <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground/80">{comment.authorName}</span>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <Avatar name={comment.author.name} url={comment.author.avatarUrl} size="sm" />
+          {authorHref ? (
+            <a
+              href={authorHref}
+              className="rounded-sm font-medium text-foreground/80 underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              {comment.authorName}
+            </a>
+          ) : (
+            <span className="font-medium text-foreground/80">{comment.authorName}</span>
+          )}
           <span aria-hidden="true">·</span>
           <time dateTime={comment.createdAt} title={new Date(comment.createdAt).toLocaleString()}>
             {relativeTime(comment.createdAt)}
@@ -139,6 +199,14 @@ function Comment({
         </div>
 
         <p className="mt-1.5 text-sm leading-6 text-foreground/90">{comment.body}</p>
+
+        {/* Comment media stays secondary to the text. */}
+        <MediaGallery
+          media={comment.media}
+          size="sm"
+          className="mt-2 max-w-xs"
+          label="Resident photo"
+        />
 
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
           <VoteControl
@@ -181,7 +249,7 @@ function Comment({
               submitLabel="Reply"
               autoFocus
               onCancel={() => setReplying(false)}
-              onSubmit={(body) => onReply(body, comment.id)}
+              onSubmit={(body, photo) => onReply(body, comment.id, photo)}
             />
           </div>
         )}
@@ -225,7 +293,7 @@ export function CommentThread({
   comments: CommentNode[]
   commentCount: number
   onVote: (commentId: string, direction: 1 | -1) => void
-  onReply: (body: string, parentId: string | null) => Promise<void>
+  onReply: (body: string, parentId: string | null, photo: File | null) => Promise<void>
   composerId?: string
   canInteract?: boolean
 }) {
@@ -237,13 +305,13 @@ export function CommentThread({
           placeholder="Add your observation or question…"
           submitLabel="Comment"
           composerId={composerId}
-          onSubmit={(body) => onReply(body, null)}
+          onSubmit={(body, photo) => onReply(body, null, photo)}
         />
       ) : (
         /*
-          Text only: the guest banner at the top of the page carries the single
-          sign-in call to action, and voting a comment routes a guest into the
-          same flow.
+          Text only: the header's account control carries the single sign-in
+          call to action, and voting a comment routes a guest into the same
+          flow.
         */
         <p className="rounded-lg border border-dashed border-border bg-secondary/40 px-4 py-3.5 text-sm text-muted-foreground">
           Sign in to join this discussion.
