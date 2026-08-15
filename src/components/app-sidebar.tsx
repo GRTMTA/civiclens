@@ -2,6 +2,7 @@ import * as React from "react"
 import {
   IconMapPin,
   IconInnerShadowTop,
+  IconUsersGroup,
 } from "@tabler/icons-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -25,7 +26,7 @@ const data = {
     {
       title: "Community",
       url: "/community",
-      icon: IconInnerShadowTop,
+      icon: IconUsersGroup,
     },
   ],
 }

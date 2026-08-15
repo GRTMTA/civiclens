@@ -421,6 +421,15 @@ function getConfirmationError(): string | null {
   return description.replace(/_/g, " ");
 }
 
+/**
+ * Compatibility route for the scan experience.
+ *
+ * `/community` now serves the community discussion surface, so the
+ * authenticated scan/report Dashboard below is reachable at `/scan` until it
+ * moves into the shared application shell.
+ */
+const SCAN_PATH = "/scan";
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -476,7 +485,7 @@ function App() {
       setSession(next);
       if (event === "SIGNED_IN") {
         setConfirmError(null);
-        navigate("/community", true);
+        navigate(SCAN_PATH, true);
       } else if (event === "SIGNED_OUT") {
         navigate("/", true);
       }
@@ -486,12 +495,12 @@ function App() {
 
   useEffect(() => {
     if (!authReady) return;
-    if (!session && path === "/community") {
+    if (!session && path === SCAN_PATH) {
       navigate("/login", true);
       return;
     }
     if (session && (path === "/login" || path === "/register")) {
-      navigate("/community", true);
+      navigate(SCAN_PATH, true);
     }
   }, [authReady, path, session]);
 
@@ -542,7 +551,7 @@ function App() {
       </main>
     );
 
-  if (path === "/community") {
+  if (path === SCAN_PATH) {
     return session ? <Dashboard /> : <AuthForm mode="sign-in" onBack={openLanding} onModeChange={navigateAuth} />;
   }
 
