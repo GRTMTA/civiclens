@@ -227,18 +227,19 @@ export function readMapUrlState(search: string): {
   }
 }
 
-export function writeCameraSearch(search: string, camera: CameraState): string {
+export function writeCameraSearch(search: string, _camera: CameraState): string {
   const params = new URLSearchParams(search)
-  const format = (value: number, fractionDigits: number) =>
-    value.toFixed(fractionDigits).replace(/\.?0+$/, "")
-  params.set("lat", format(camera.latitude, 4))
-  params.set("lng", format(camera.longitude, 4))
-  params.set("zoom", format(camera.zoom, 2))
+  params.delete("lat")
+  params.delete("lng")
+  params.delete("zoom")
   return params.toString()
 }
 
 export function writeProjectSearch(search: string, projectId: string | null): string {
   const params = new URLSearchParams(search)
+  params.delete("lat")
+  params.delete("lng")
+  params.delete("zoom")
   if (projectId) params.set("project", projectId)
   else params.delete("project")
   return params.toString()

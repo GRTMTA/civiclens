@@ -84,22 +84,20 @@ describe("official project map contract", () => {
     expect(readMapUrlState("?lat=0&lng=0&zoom=0").camera).toBeNull()
   })
 
-  it("writes camera state without changing project selection", () => {
+  it("keeps camera state out of the public URL", () => {
     expect(
-      writeCameraSearch("?project=dpwh-1", {
+      writeCameraSearch("?project=dpwh-1&lat=10&lng=123&zoom=8", {
         latitude: 10.3157,
         longitude: 123.8854,
         zoom: 12.5,
       }),
-    ).toBe("project=dpwh-1&lat=10.3157&lng=123.8854&zoom=12.5")
+    ).toBe("project=dpwh-1")
   })
 
-  it("opens and closes project selection through URL state", () => {
-    expect(writeProjectSearch("?lat=10.3", "dpwh-1")).toBe(
-      "lat=10.3&project=dpwh-1",
+  it("opens and closes project selection without camera parameters", () => {
+    expect(writeProjectSearch("?lat=10.3&lng=123.8&zoom=12", "dpwh-1")).toBe(
+      "project=dpwh-1",
     )
-    expect(writeProjectSearch("?project=dpwh-1&lat=10.3", null)).toBe(
-      "lat=10.3",
-    )
+    expect(writeProjectSearch("?project=dpwh-1&lat=10.3", null)).toBe("")
   })
 })

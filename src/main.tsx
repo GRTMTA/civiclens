@@ -431,20 +431,42 @@ function App() {
     return null;
   };
   const [authMode, setAuthMode] = useState<"sign-in" | "sign-up" | null>(getAuthMode);
+  const [path, setPath] = useState(window.location.pathname);
+  const navigate = (nextPath: string, replace = false) => {
+    window.history[replace ? "replaceState" : "pushState"]({}, "", nextPath);
+    setPath(nextPath);
+    setAuthMode(
+      nextPath === "/register"
+        ? "sign-up"
+        : nextPath === "/login"
+          ? "sign-in"
+          : null,
+    );
+  };
   const navigateAuth = (mode: "sign-in" | "sign-up") => {
-    window.history.pushState({}, "", mode === "sign-up" ? "/register" : "/login");
-    setAuthMode(mode);
+    navigate(mode === "sign-up" ? "/register" : "/login");
   };
   const openLanding = () => {
-    window.history.pushState({}, "", "/");
     document.title = "CivicLens";
-    setAuthMode(null);
+    navigate("/");
   };
+
   useEffect(() => {
-    const onPopState = () => setAuthMode(getAuthMode());
+    const onPopState = () => {
+      const nextPath = window.location.pathname;
+      setPath(nextPath);
+      setAuthMode(
+        nextPath === "/register"
+          ? "sign-up"
+          : nextPath === "/login"
+            ? "sign-in"
+            : null,
+      );
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -454,68 +476,82 @@ function App() {
       setSession(next);
       if (event === "SIGNED_IN") {
         setConfirmError(null);
-        window.history.replaceState({}, "", "/");
-        setAuthMode(null);
+        navigate("/community", true);
       } else if (event === "SIGNED_OUT") {
-        window.history.replaceState({}, "", "/");
-        setAuthMode(null);
+        navigate("/", true);
       }
     });
     return () => data.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!session && path === "/community") {
+      navigate("/login", true);
+      return;
+    }
+    if (session && (path === "/login" || path === "/register")) {
+      navigate("/community", true);
+    }
+  }, [authReady, path, session]);
+
   if (!authReady)
     return (
       <main>
         <p className="muted">Loading CivicLens…</p>
       </main>
     );
-  if (!session) {
-    if (confirmError)
-      return (
-        <main className="auth-shell">
-          <section className="auth-visual" aria-label="CivicLens community infrastructure monitoring">
-            <video autoPlay muted loop playsInline preload="auto" aria-hidden="true">
-              <source
-                src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260813_052122_e77a27e6-17f1-4794-889b-3ceaa0e9e8cb.mp4"
-                type="video/mp4"
-              />
-            </video>
-            <div className="auth-scrim" />
-          </section>
-          <section className="auth-pane">
-            <div className="auth-card">
-              <button type="button" className="auth-back" onClick={() => { window.history.replaceState({}, "", "/"); setConfirmError(null); }} aria-label="Back to CivicLens home">
-                <span aria-hidden="true">←</span> CivicLens
-              </button>
-              <div className="auth-form" style={{ textAlign: "center" }}>
-                <div className="auth-intro">
-                  <p className="auth-kicker">EMAIL CONFIRMATION</p>
-                  <h1>Link expired</h1>
-                  <p>This confirmation link is no longer valid.</p>
-                </div>
-                <p className="auth-message" role="alert" style={{ margin: "0 0 24px" }}>{confirmError}</p>
-                <button
-                  className="auth-submit"
-                  type="button"
-                  onClick={() => { window.history.replaceState({}, "", "/login"); setConfirmError(null); setAuthMode("sign-in"); }}
-                >
-                  <span>Log in to CivicLens</span>
-                  <svg viewBox="0 0 22 22" aria-hidden="true">
-                    <path d="M3 11h15.4M11 3.3l7.7 7.7-7.7 7.7" />
-                  </svg>
-                </button>
+
+  if (confirmError)
+    return (
+      <main className="auth-shell">
+        <section className="auth-visual" aria-label="CivicLens community infrastructure monitoring">
+          <video autoPlay muted loop playsInline preload="auto" aria-hidden="true">
+            <source
+              src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260813_052122_e77a27e6-17f1-4794-889b-3ceaa0e9e8cb.mp4"
+              type="video/mp4"
+            />
+          </video>
+          <div className="auth-scrim" />
+        </section>
+        <section className="auth-pane">
+          <div className="auth-card">
+            <button type="button" className="auth-back" onClick={() => { setConfirmError(null); navigate("/", true); }} aria-label="Back to CivicLens home">
+              <span aria-hidden="true">←</span> CivicLens
+            </button>
+            <div className="auth-form" style={{ textAlign: "center" }}>
+              <div className="auth-intro">
+                <p className="auth-kicker">EMAIL CONFIRMATION</p>
+                <h1>Link expired</h1>
+                <p>This confirmation link is no longer valid.</p>
               </div>
+              <p className="auth-message" role="alert" style={{ margin: "0 0 24px" }}>{confirmError}</p>
+              <button
+                className="auth-submit"
+                type="button"
+                onClick={() => { setConfirmError(null); navigate("/login", true); }}
+              >
+                <span>Log in to CivicLens</span>
+                <svg viewBox="0 0 22 22" aria-hidden="true">
+                  <path d="M3 11h15.4M11 3.3l7.7 7.7-7.7 7.7" />
+                </svg>
+              </button>
             </div>
-          </section>
-        </main>
-      );
-    return authMode ? (
-      <AuthForm key={authMode} mode={authMode} onBack={openLanding} onModeChange={navigateAuth} />
-    ) : (
-      <Landing onSignIn={() => navigateAuth("sign-in")} />
+          </div>
+        </section>
+      </main>
     );
+
+  if (path === "/community") {
+    return session ? <Dashboard /> : <AuthForm mode="sign-in" onBack={openLanding} onModeChange={navigateAuth} />;
   }
-  return <Dashboard />;
+
+  if (authMode) {
+    if (session) return null;
+    return <AuthForm key={authMode} mode={authMode} onBack={openLanding} onModeChange={navigateAuth} />;
+  }
+
+  return <Landing onSignIn={() => navigateAuth("sign-in")} />;
 }
 
 // ── Comment Thread (side panel) ───────────────────────────────────────────────
