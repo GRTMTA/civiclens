@@ -1,35 +1,30 @@
 import * as React from "react"
 import { IconInfoCircle } from "@tabler/icons-react"
 
-import { Button } from "@/components/ui/button"
+import { AuthMenu } from "@/components/auth-menu"
 import { Separator } from "@/components/ui/separator"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
-import { LOGIN_PATH } from "./community-auth"
+import { requestSignIn } from "./community-auth"
 import { CommunitySidebar } from "./community-sidebar"
 import type { SortOption, TopicId } from "./community-contract"
+import type { Viewer } from "./community-data"
 
 /**
- * Prompt shown to residents browsing without an account.
+ * Quiet note for residents browsing without an account.
  *
  * Discussion is readable anonymously, so this explains why the write controls
- * will not work rather than hiding the content behind a wall. This is the one
- * persistent sign-in call to action on the community surface — write controls
- * elsewhere route guests into the same flow instead of repeating the button.
+ * behave differently rather than hiding the content behind a wall. It carries
+ * no button: the header's `AuthMenu` is the single sign-in call to action.
  */
-function SignInNotice() {
+function GuestNote() {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/60 px-3.5 py-2.5">
-      <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
-        <IconInfoCircle className="mt-px size-4 shrink-0" aria-hidden="true" />
-        <span>
-          You are browsing as a guest. Sign in to post, comment, and vote.
-        </span>
-      </p>
-      <Button size="sm" variant="outline" asChild>
-        <a href={LOGIN_PATH}>Sign in</a>
-      </Button>
-    </div>
+    <p className="flex items-start gap-2 rounded-lg border border-border bg-secondary/60 px-3.5 py-2.5 text-xs leading-5 text-muted-foreground">
+      <IconInfoCircle className="mt-px size-4 shrink-0" aria-hidden="true" />
+      <span>
+        You are browsing as a guest. Sign in to post, comment, and vote.
+      </span>
+    </p>
   )
 }
 
@@ -48,7 +43,10 @@ export function CommunityShell({
   onSortChange,
   topic,
   onTopicChange,
-  showSignInNotice = false,
+  showGuestNote = false,
+  viewer,
+  viewerReady = false,
+  onSignOut,
   children,
 }: {
   headerTitle: string
@@ -57,7 +55,10 @@ export function CommunityShell({
   onSortChange: (sort: SortOption) => void
   topic: TopicId | null
   onTopicChange: (topic: TopicId | null) => void
-  showSignInNotice?: boolean
+  showGuestNote?: boolean
+  viewer?: Viewer | null
+  viewerReady?: boolean
+  onSignOut?: () => void
   children: React.ReactNode
 }) {
   return (
@@ -99,13 +100,21 @@ export function CommunityShell({
                 />
                 <h1 className="truncate text-sm font-medium">{headerTitle}</h1>
                 {breadcrumb}
+                <div className="ml-auto flex shrink-0 items-center">
+                  <AuthMenu
+                    viewer={viewer ?? null}
+                    ready={viewerReady}
+                    onSignIn={requestSignIn}
+                    onSignOut={onSignOut ?? (() => {})}
+                  />
+                </div>
               </div>
             </header>
 
             <div className="mx-auto w-full max-w-[84rem] min-w-0 px-3 py-4 sm:px-5 sm:py-5">
-              {showSignInNotice && (
+              {showGuestNote && (
                 <div className="mb-3">
-                  <SignInNotice />
+                  <GuestNote />
                 </div>
               )}
               {children}

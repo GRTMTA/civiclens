@@ -15,12 +15,20 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   buildCommentTree,
   COMMUNITY_TOPICS,
+  POST_KINDS,
+  type Author,
   type CommentNode,
   type CommunityComment,
   type CommunityPost,
+  type CommunityProfile,
+  type CommunityPulse,
   type FeedQuery,
+  type MediaItem,
   type NewCommentInput,
   type NewPostInput,
+  type PostKind,
+  type ProfileEdit,
+  type ProjectActivityItem,
   type ProjectReference,
   type TopicId,
   type VoteState,
@@ -53,6 +61,23 @@ export function isCommunityAuthRequiredError(
   return error instanceof CommunityAuthRequiredError
 }
 
+/**
+ * Raised when text was saved but its photos were not.
+ *
+ * Distinct from a plain failure: the post or comment exists, so the UI reports
+ * a partial success rather than inviting the resident to write it again.
+ */
+export class CommunityMediaError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "CommunityMediaError"
+  }
+}
+
+export function isCommunityMediaError(error: unknown): error is CommunityMediaError {
+  return error instanceof CommunityMediaError
+}
+
 export type CommunitySource = {
   listPosts(query: FeedQuery): Promise<CommunityPost[]>
   getPost(postId: string): Promise<CommunityPost | null>
@@ -67,7 +92,41 @@ export type CommunitySource = {
   /** Projects a resident can optionally relate a discussion to. */
   searchProjects(term: string): Promise<ProjectReference[]>
   /** Resolves the signed-in resident, or null when browsing anonymously. */
-  getViewer(): Promise<{ id: string; name: string } | null>
+  getViewer(): Promise<Viewer | null>
+  /** Aggregate community activity, optionally scoped to one project. */
+  getPulse(projectId?: string | null): Promise<CommunityPulse>
+  /** Recent community activity about one project, newest first. */
+  getProjectActivity(projectId: string, limit?: number): Promise<ProjectActivityItem[]>
+  getProfile(username: string): Promise<CommunityProfile | null>
+  updateProfile(edit: ProfileEdit): Promise<CommunityProfile>
+  uploadAvatar(file: File): Promise<CommunityProfile>
+  removeAvatar(): Promise<CommunityProfile>
+  signOut(): Promise<void>
+}
+
+/** The signed-in resident, as the UI needs them. */
+export type Viewer = {
+  id: string
+  name: string
+  username: string | null
+  avatarUrl: string | null
+  bio: string
+}
+
+// ── Storage ──────────────────────────────────────────────────────────────────
+// Bucket ids match `20260816000000_community_profiles_and_media.sql`. These
+// buckets are public so guests can see the photos in discussion they browse;
+// write access is owner-only through storage policies.
+
+export const AVATAR_BUCKET = "avatars"
+export const POST_MEDIA_BUCKET = "community-post-media"
+export const COMMENT_MEDIA_BUCKET = "community-comment-media"
+
+/** Keeps uploaded object names predictable and free of user-supplied text. */
+function mediaObjectName(file: File): string {
+  const extension =
+    file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg"
+  return `${crypto.randomUUID()}.${extension}`
 }
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
@@ -99,12 +158,42 @@ function asTopic(value: unknown): TopicId {
   return COMMUNITY_TOPICS.includes(topic as TopicId) ? (topic as TopicId) : "other"
 }
 
+function asKind(value: unknown): PostKind {
+  const kind = asString(value)
+  return POST_KINDS.includes(kind as PostKind) ? (kind as PostKind) : "discussion"
+}
+
 function asVote(value: unknown): VoteState {
   const vote = asNumber(value)
   return vote === 1 ? 1 : vote === -1 ? -1 : 0
 }
 
-function parsePost(value: unknown): CommunityPost | null {
+/** Resolves a storage path in a public bucket to a renderable URL. */
+type UrlResolver = (bucket: string, path: string) => string
+
+function parseAuthor(value: unknown, fallbackName: string, publicUrl: UrlResolver): Author {
+  const row = asRecord(value)
+  const username = asString(row?.username)
+  const avatarPath = asString(row?.avatar_path)
+  return {
+    name: asString(row?.name, fallbackName) || fallbackName,
+    username: username || null,
+    avatarPath: avatarPath || null,
+    avatarUrl: avatarPath ? publicUrl(AVATAR_BUCKET, avatarPath) : null,
+  }
+}
+
+function parseMedia(value: unknown, bucket: string, publicUrl: UrlResolver): MediaItem[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    const row = asRecord(entry)
+    const id = asString(row?.id)
+    const path = asString(row?.path)
+    return id && path ? [{ id, path, url: publicUrl(bucket, path) }] : []
+  })
+}
+
+function parsePost(value: unknown, publicUrl: UrlResolver): CommunityPost | null {
   const row = asRecord(value)
   const id = asString(row?.id)
   const title = asString(row?.title)
@@ -112,12 +201,16 @@ function parsePost(value: unknown): CommunityPost | null {
 
   const projectId = asString(row.project_id)
   const projectName = asString(row.project_name)
+  const authorName = asString(row.author_name, "Resident")
+  const areaLabel = asString(row.area_label)
 
   return {
     id,
+    kind: asKind(row.kind),
     title,
     body: asString(row.body),
-    authorName: asString(row.author_name, "Resident"),
+    authorName,
+    author: parseAuthor(row.author, authorName, publicUrl),
     createdAt: asString(row.created_at),
     topic: asTopic(row.topic),
     score: asNumber(row.score),
@@ -126,24 +219,86 @@ function parsePost(value: unknown): CommunityPost | null {
     // Without a resolvable name there is nothing meaningful to show, so the
     // reference is dropped rather than rendering an empty chip.
     project: projectId && projectName ? { id: projectId, name: projectName } : null,
+    areaLabel: areaLabel || null,
+    media: parseMedia(row.media, POST_MEDIA_BUCKET, publicUrl),
   }
 }
 
-function parseComment(value: unknown): CommunityComment | null {
+function parseComment(value: unknown, publicUrl: UrlResolver): CommunityComment | null {
   const row = asRecord(value)
   const id = asString(row?.id)
   if (!row || !id) return null
 
   const parentId = asString(row.parent_id)
+  const authorName = asString(row.author_name, "Resident")
   return {
     id,
     postId: asString(row.post_id),
     parentId: parentId || null,
-    authorName: asString(row.author_name, "Resident"),
+    authorName,
+    author: parseAuthor(row.author, authorName, publicUrl),
     body: asString(row.body),
     createdAt: asString(row.created_at),
     score: asNumber(row.score),
     viewerVote: asVote(row.viewer_vote),
+    media: parseMedia(row.media, COMMENT_MEDIA_BUCKET, publicUrl),
+  }
+}
+
+function parsePulse(value: unknown): CommunityPulse {
+  const row = asRecord(value)
+  const rawTopics = Array.isArray(row?.topics) ? row.topics : []
+  const lastActivity = asString(row?.last_activity_at)
+  return {
+    discussions: asNumber(row?.discussions),
+    observations: asNumber(row?.observations),
+    photos: asNumber(row?.photos),
+    comments: asNumber(row?.comments),
+    lastActivityAt: lastActivity || null,
+    topics: rawTopics.flatMap((entry) => {
+      const topicRow = asRecord(entry)
+      const topic = asString(topicRow?.topic)
+      return topic ? [{ topic: asTopic(topic), count: asNumber(topicRow?.count) }] : []
+    }),
+  }
+}
+
+function parseActivity(value: unknown): ProjectActivityItem[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    const row = asRecord(entry)
+    const postId = asString(row?.post_id)
+    const title = asString(row?.title)
+    if (!postId || !title) return []
+    return [
+      {
+        postId,
+        kind: asKind(row?.kind),
+        title,
+        excerpt: asString(row?.body),
+        authorName: asString(row?.author_name, "Resident"),
+        createdAt: asString(row?.created_at),
+        photoCount: asNumber(row?.photo_count),
+      },
+    ]
+  })
+}
+
+function parseProfile(value: unknown, publicUrl: UrlResolver): CommunityProfile | null {
+  const row = asRecord(value)
+  const username = asString(row?.username)
+  if (!row || !username) return null
+  const avatarPath = asString(row.avatar_path)
+  return {
+    username,
+    displayName: asString(row.display_name, "Resident"),
+    bio: asString(row.bio),
+    avatarPath: avatarPath || null,
+    avatarUrl: avatarPath ? publicUrl(AVATAR_BUCKET, avatarPath) : null,
+    joinedAt: asString(row.joined_at),
+    postCount: asNumber(row.post_count),
+    observationCount: asNumber(row.observation_count),
+    commentCount: asNumber(row.comment_count),
   }
 }
 
@@ -201,6 +356,9 @@ function toFriendlyError(message: string): Error {
 // ── Supabase-backed source ───────────────────────────────────────────────────
 
 function createSupabaseSource(client: SupabaseClient): CommunitySource {
+  const publicUrl: UrlResolver = (bucket, path) =>
+    client.storage.from(bucket).getPublicUrl(path).data.publicUrl
+
   async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
     const { data, error } = await client.rpc(name, args)
     if (error) throw toFriendlyError(error.message || `Unable to complete ${name}.`)
@@ -213,24 +371,62 @@ function createSupabaseSource(client: SupabaseClient): CommunitySource {
     if (!data.session) throw new CommunityAuthRequiredError()
   }
 
+  /**
+   * Uploads photos under `<bucket>/<owner-id>/` and registers the paths.
+   *
+   * The row exists before any upload so the storage policy can verify
+   * ownership by folder. An upload failure is reported but does not discard the
+   * post: the text is already saved, and the composer surfaces the shortfall.
+   */
+  async function uploadMedia(
+    bucket: string,
+    ownerId: string,
+    files: File[],
+    attachRpc: string,
+    idArg: string,
+  ): Promise<{ failed: number }> {
+    if (files.length === 0) return { failed: 0 }
+
+    const uploaded: string[] = []
+    let failed = 0
+
+    for (const file of files) {
+      const path = `${ownerId}/${mediaObjectName(file)}`
+      const { error } = await client.storage
+        .from(bucket)
+        .upload(path, file, { contentType: file.type, upsert: false })
+      if (error) failed += 1
+      else uploaded.push(path)
+    }
+
+    if (uploaded.length > 0) {
+      await rpc(attachRpc, { [idArg]: ownerId, p_paths: uploaded })
+    }
+
+    return { failed }
+  }
+
   return {
     async listPosts(query) {
       const data = await rpc("community_feed", {
         p_sort: query.sort,
         p_topic: query.topic,
         p_search: query.search.trim() || null,
+        p_project_id: query.projectId,
+        p_kind: query.kind,
+        p_author: query.author,
       })
-      return Array.isArray(data) ? data.flatMap((row) => parsePost(row) ?? []) : []
+      return Array.isArray(data) ? data.flatMap((row) => parsePost(row, publicUrl) ?? []) : []
     },
 
     async getPost(postId) {
-      return parsePost(await rpc("community_post", { p_post_id: postId }))
+      return parsePost(await rpc("community_post", { p_post_id: postId }), publicUrl)
     },
 
     async listComments(postId) {
       const data = await rpc("community_comments_for_post", { p_post_id: postId })
       const comments = Array.isArray(data)
-        ? data.flatMap((row) => parseComment(row) ?? [])
+        ? data.flatMap((row) => parseComment(row, publicUrl) ?? [])
         : []
       return buildCommentTree(comments)
     },
@@ -243,10 +439,31 @@ function createSupabaseSource(client: SupabaseClient): CommunitySource {
           p_body: input.body.trim(),
           p_topic: input.topic,
           p_project_id: input.projectId,
+          p_kind: input.kind,
+          // Area is meaningful only for an observation.
+          p_area_label: input.kind === "observation" ? input.areaLabel?.trim() || null : null,
         }),
+        publicUrl,
       )
       if (!created) throw new Error("Your post was saved but could not be displayed.")
-      return created
+
+      const { failed } = await uploadMedia(
+        POST_MEDIA_BUCKET,
+        created.id,
+        input.photos,
+        "attach_community_post_media",
+        "p_post_id",
+      )
+      if (failed > 0) {
+        throw new CommunityMediaError(
+          failed === input.photos.length
+            ? "Your post was published, but the photos could not be uploaded."
+            : `Your post was published, but ${failed} photo(s) could not be uploaded.`,
+        )
+      }
+
+      // Re-read so the returned post carries the media rows just registered.
+      return (await this.getPost(created.id)) ?? created
     },
 
     async createComment(input) {
@@ -257,8 +474,34 @@ function createSupabaseSource(client: SupabaseClient): CommunitySource {
           p_body: input.body.trim(),
           p_parent_id: input.parentId,
         }),
+        publicUrl,
       )
       if (!created) throw new Error("Your comment was saved but could not be displayed.")
+
+      if (input.photo) {
+        const { failed } = await uploadMedia(
+          COMMENT_MEDIA_BUCKET,
+          created.id,
+          [input.photo],
+          "attach_community_comment_media",
+          "p_comment_id",
+        )
+        if (failed > 0) {
+          throw new CommunityMediaError(
+            "Your comment was posted, but the photo could not be uploaded.",
+          )
+        }
+        // Re-read the registered path rather than reconstructing it.
+        return {
+          ...created,
+          media: parseMedia(
+            await rpc("community_comment_media_paths", { p_comment_id: created.id }),
+            COMMENT_MEDIA_BUCKET,
+            publicUrl,
+          ),
+        }
+      }
+
       return created
     },
 
@@ -286,18 +529,85 @@ function createSupabaseSource(client: SupabaseClient): CommunitySource {
       )
     },
 
+    async getPulse(projectId = null) {
+      return parsePulse(await rpc("community_pulse", { p_project_id: projectId }))
+    },
+
+    async getProjectActivity(projectId, limit = 5) {
+      return parseActivity(
+        await rpc("community_project_activity", { p_project_id: projectId, p_limit: limit }),
+      )
+    },
+
+    async getProfile(username) {
+      return parseProfile(await rpc("community_profile", { p_username: username }), publicUrl)
+    },
+
+    async updateProfile(edit) {
+      await requireViewer()
+      const updated = parseProfile(
+        await rpc("update_community_profile", {
+          p_display_name: edit.displayName.trim(),
+          p_username: edit.username.trim().toLowerCase(),
+          p_bio: edit.bio.trim(),
+        }),
+        publicUrl,
+      )
+      if (!updated) throw new Error("Your profile was saved but could not be displayed.")
+      return updated
+    },
+
+    async uploadAvatar(file) {
+      await requireViewer()
+      const { data } = await client.auth.getUser()
+      const userId = data.user?.id
+      if (!userId) throw new CommunityAuthRequiredError()
+
+      // A fresh object name per upload avoids serving a stale cached avatar.
+      const path = `${userId}/${mediaObjectName(file)}`
+      const { error } = await client.storage
+        .from(AVATAR_BUCKET)
+        .upload(path, file, { contentType: file.type, upsert: true })
+      if (error) throw new CommunityMediaError("Your profile photo could not be uploaded.")
+
+      const updated = parseProfile(
+        await rpc("update_community_profile", { p_avatar_path: path }),
+        publicUrl,
+      )
+      if (!updated) throw new Error("Your profile photo was saved but could not be displayed.")
+      return updated
+    },
+
+    async removeAvatar() {
+      await requireViewer()
+      const updated = parseProfile(
+        await rpc("update_community_profile", { p_clear_avatar: true }),
+        publicUrl,
+      )
+      if (!updated) throw new Error("Your profile could not be updated.")
+      return updated
+    },
+
+    async signOut() {
+      await client.auth.signOut()
+    },
+
     async getViewer() {
       const { data } = await client.auth.getUser()
       const user = data.user
       if (!user) return null
       const { data: profile } = await client
         .from("profiles")
-        .select("display_name")
+        .select("display_name, username, bio, avatar_path")
         .eq("id", user.id)
         .maybeSingle()
+      const avatarPath = asString(profile?.avatar_path)
       return {
         id: user.id,
         name: asString(profile?.display_name) || user.email?.split("@")[0] || "You",
+        username: asString(profile?.username) || null,
+        avatarUrl: avatarPath ? publicUrl(AVATAR_BUCKET, avatarPath) : null,
+        bio: asString(profile?.bio),
       }
     },
   }

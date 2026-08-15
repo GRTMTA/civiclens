@@ -11,11 +11,17 @@ import {
   applyVote,
   COMMUNITY_TOPICS,
   countComments,
+  POST_KINDS,
   SORT_OPTIONS,
   type CommentNode,
   type CommunityPost,
+  type CommunityProfile,
+  type CommunityPulse,
   type FeedQuery,
+  type NewCommentInput,
   type NewPostInput,
+  type PostKind,
+  type ProfileEdit,
   type SortOption,
   type TopicId,
   type VoteState,
@@ -24,16 +30,19 @@ import {
   getCommunitySource,
   isCommunityAuthRequiredError,
   isCommunityConfigurationError,
+  isCommunityMediaError,
   isCommunitySchemaMissingError,
   type CommunitySource,
+  type Viewer,
 } from "./community-data"
 
 type LoadState = "loading" | "ready" | "error" | "unconfigured"
 
-export type Viewer = { id: string; name: string } | null
+export type { Viewer }
 
 function messageFor(cause: unknown, fallback: string): string {
   if (isCommunityAuthRequiredError(cause)) return cause.message
+  if (isCommunityMediaError(cause)) return cause.message
   return cause instanceof Error ? cause.message : fallback
 }
 
@@ -64,11 +73,13 @@ function useSource() {
 
 /** Tracks the signed-in resident so the UI can gate write actions. */
 function useViewer(source: CommunitySource | null): {
-  viewer: Viewer
+  viewer: Viewer | null
   ready: boolean
+  refresh: () => void
 } {
-  const [viewer, setViewer] = useState<Viewer>(null)
+  const [viewer, setViewer] = useState<Viewer | null>(null)
   const [ready, setReady] = useState(false)
+  const [token, setToken] = useState(0)
 
   useEffect(() => {
     if (!source) {
@@ -90,9 +101,11 @@ function useViewer(source: CommunitySource | null): {
     return () => {
       cancelled = true
     }
-  }, [source])
+  }, [source, token])
 
-  return { viewer, ready }
+  const refresh = useCallback(() => setToken((value) => value + 1), [])
+
+  return { viewer, ready, refresh }
 }
 
 function mapNode(
@@ -119,14 +132,36 @@ function insertReply(
   )
 }
 
-/** Reads the feed's initial sort and topic from the URL, if present. */
-function readFeedUrlState(search: string): { sort: SortOption; topic: TopicId | null } {
+/**
+ * Signs the resident out and returns them to the community as a guest.
+ *
+ * A reload is the simplest correct reset here: every hook re-reads its viewer,
+ * and no stale authenticated state can survive in memory.
+ */
+function useSignOut(source: CommunitySource | null) {
+  return useCallback(() => {
+    if (!source) return
+    void source.signOut().finally(() => window.location.assign("/community"))
+  }, [source])
+}
+
+/** Reads the feed's initial filters from the URL, if present. */
+function readFeedUrlState(search: string): {
+  sort: SortOption
+  topic: TopicId | null
+  projectId: string | null
+  kind: PostKind | null
+} {
   const params = new URLSearchParams(search)
   const rawSort = params.get("sort")
   const rawTopic = params.get("topic")
+  const rawKind = params.get("kind")
+  const rawProject = params.get("project")?.trim() ?? ""
   return {
     sort: SORT_OPTIONS.includes(rawSort as SortOption) ? (rawSort as SortOption) : "popular",
     topic: COMMUNITY_TOPICS.includes(rawTopic as TopicId) ? (rawTopic as TopicId) : null,
+    kind: POST_KINDS.includes(rawKind as PostKind) ? (rawKind as PostKind) : null,
+    projectId: rawProject || null,
   }
 }
 
@@ -136,14 +171,20 @@ export function useCommunityFeed() {
   const [sort, setSort] = useState<SortOption>(initial.sort)
   const [search, setSearch] = useState("")
   const [topic, setTopic] = useState<TopicId | null>(initial.topic)
+  const [kind, setKind] = useState<PostKind | null>(initial.kind)
+  const [projectId, setProjectId] = useState<string | null>(initial.projectId)
   const [posts, setPosts] = useState<CommunityPost[]>([])
   const [state, setState] = useState<LoadState>(configError ? "unconfigured" : "loading")
   const [error, setError] = useState<string | null>(configError)
   const [reloadToken, setReloadToken] = useState(0)
   const requestRef = useRef(0)
-  const { viewer, ready: viewerReady } = useViewer(source)
+  const { viewer, ready: viewerReady, refresh: refreshViewer } = useViewer(source)
+  const signOut = useSignOut(source)
 
-  const query = useMemo<FeedQuery>(() => ({ sort, search, topic }), [sort, search, topic])
+  const query = useMemo<FeedQuery>(
+    () => ({ sort, search, topic, projectId, kind, author: null }),
+    [sort, search, topic, projectId, kind],
+  )
 
   useEffect(() => {
     if (!source) return
@@ -206,7 +247,18 @@ export function useCommunityFeed() {
       setSort("new")
       setSearch("")
       setTopic(null)
-      setPosts(await source.listPosts({ sort: "new", search: "", topic: null }))
+      setKind(null)
+      setProjectId(null)
+      setPosts(
+        await source.listPosts({
+          sort: "new",
+          search: "",
+          topic: null,
+          projectId: null,
+          kind: null,
+          author: null,
+        }),
+      )
       return created
     },
     [configError, source],
@@ -222,12 +274,149 @@ export function useCommunityFeed() {
     setSearch,
     topic,
     setTopic,
+    kind,
+    setKind,
+    projectId,
+    setProjectId,
     vote,
     createPost,
     retry,
     viewer,
     viewerReady,
+    refreshViewer,
+    signOut,
     canInteract: Boolean(source && viewer),
+  }
+}
+
+/**
+ * Aggregate community activity, optionally scoped to one project.
+ *
+ * These counts describe resident discussion. They say nothing about a project's
+ * condition, and the UI labels them as discussion activity.
+ */
+export function useCommunityPulse(projectId: string | null = null) {
+  const { source } = useSource()
+  const [pulse, setPulse] = useState<CommunityPulse | null>(null)
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading")
+
+  useEffect(() => {
+    if (!source) {
+      setState("error")
+      return
+    }
+    let cancelled = false
+    setState("loading")
+    source
+      .getPulse(projectId)
+      .then((next) => {
+        if (cancelled) return
+        setPulse(next)
+        setState("ready")
+      })
+      .catch(() => {
+        if (!cancelled) setState("error")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, source])
+
+  return { pulse, state }
+}
+
+/** A resident's public profile plus the content they have contributed. */
+export function useCommunityProfile(username: string) {
+  const { source, configError } = useSource()
+  const [profile, setProfile] = useState<CommunityProfile | null>(null)
+  const [posts, setPosts] = useState<CommunityPost[]>([])
+  const [state, setState] = useState<LoadState>(configError ? "unconfigured" : "loading")
+  const [error, setError] = useState<string | null>(configError)
+  const [reloadToken, setReloadToken] = useState(0)
+  const { viewer, ready: viewerReady, refresh: refreshViewer } = useViewer(source)
+  const signOut = useSignOut(source)
+
+  useEffect(() => {
+    if (!source) return
+    let cancelled = false
+    setState("loading")
+    setError(null)
+    source
+      .getProfile(username)
+      .then(async (next) => {
+        if (cancelled) return
+        setProfile(next)
+        if (next) {
+          setPosts(
+            await source.listPosts({
+              sort: "new",
+              search: "",
+              topic: null,
+              projectId: null,
+              kind: null,
+              author: next.username,
+            }),
+          )
+        }
+        if (!cancelled) setState("ready")
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return
+        setError(messageFor(cause, "Unable to load this profile."))
+        setState(stateFor(cause))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [reloadToken, source, username])
+
+  const save = useCallback(
+    async (edit: ProfileEdit) => {
+      if (!source) throw new Error(configError ?? "Community profiles are unavailable.")
+      const updated = await source.updateProfile(edit)
+      setProfile(updated)
+      refreshViewer()
+      // A handle change moves the profile's canonical URL.
+      if (updated.username !== username) {
+        window.history.replaceState({}, "", `/community/profile/${updated.username}`)
+      }
+      return updated
+    },
+    [configError, refreshViewer, source, username],
+  )
+
+  const uploadAvatar = useCallback(
+    async (file: File) => {
+      if (!source) throw new Error(configError ?? "Community profiles are unavailable.")
+      const updated = await source.uploadAvatar(file)
+      setProfile(updated)
+      refreshViewer()
+      return updated
+    },
+    [configError, refreshViewer, source],
+  )
+
+  const removeAvatar = useCallback(async () => {
+    if (!source) throw new Error(configError ?? "Community profiles are unavailable.")
+    const updated = await source.removeAvatar()
+    setProfile(updated)
+    refreshViewer()
+    return updated
+  }, [configError, refreshViewer, source])
+
+  return {
+    profile,
+    posts,
+    state,
+    error,
+    save,
+    uploadAvatar,
+    removeAvatar,
+    retry: () => setReloadToken((token) => token + 1),
+    viewer,
+    viewerReady,
+    signOut,
+    isOwner: Boolean(viewer && profile && viewer.username === profile.username),
   }
 }
 
@@ -238,6 +427,7 @@ export function usePostThread(postId: string) {
   const [state, setState] = useState<LoadState>(configError ? "unconfigured" : "loading")
   const [error, setError] = useState<string | null>(configError)
   const { viewer, ready: viewerReady } = useViewer(source)
+  const signOut = useSignOut(source)
 
   useEffect(() => {
     if (!source) return
@@ -301,9 +491,10 @@ export function usePostThread(postId: string) {
   )
 
   const addComment = useCallback(
-    async (body: string, parentId: string | null) => {
+    async (body: string, parentId: string | null, photo?: File | null) => {
       if (!source) throw new Error(configError ?? "Community discussion is unavailable.")
-      const created = await source.createComment({ postId, parentId, body })
+      const input: NewCommentInput = { postId, parentId, body, photo: photo ?? null }
+      const created = await source.createComment(input)
       const node: CommentNode = { ...created, replies: [] }
       setComments((current) =>
         parentId ? insertReply(current, parentId, node) : [...current, node],
@@ -328,6 +519,7 @@ export function usePostThread(postId: string) {
     addComment,
     viewer,
     viewerReady,
+    signOut,
     canInteract: Boolean(source && viewer),
   }
 }

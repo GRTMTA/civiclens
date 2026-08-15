@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
+import { ProjectCommunityContext } from "./project-community-context"
+import { ProjectTimeline } from "./project-timeline"
 import {
   createPublicRpcClient,
   fetchProjectDetail,
@@ -439,6 +441,9 @@ function ProjectDetailContent({
           </div>
         </dl>
       </section>
+
+      <Separator />
+      <ProjectCommunityContext detail={detail} />
 
       <Separator />
       <section aria-labelledby="provenance-heading" className="space-y-2">
