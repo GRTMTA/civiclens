@@ -80,6 +80,7 @@ export function isCommunityMediaError(error: unknown): error is CommunityMediaEr
 
 export type CommunitySource = {
   listPosts(query: FeedQuery): Promise<CommunityPost[]>
+  listPostsForProject(projectId: string): Promise<CommunityPost[]>
   getPost(postId: string): Promise<CommunityPost | null>
   listComments(postId: string): Promise<CommentNode[]>
   createPost(input: NewPostInput): Promise<CommunityPost>
@@ -355,7 +356,7 @@ function toFriendlyError(message: string): Error {
 
 // ── Supabase-backed source ───────────────────────────────────────────────────
 
-function createSupabaseSource(client: SupabaseClient): CommunitySource {
+export function createSupabaseSource(client: SupabaseClient): CommunitySource {
   const publicUrl: UrlResolver = (bucket, path) =>
     client.storage.from(bucket).getPublicUrl(path).data.publicUrl
 
@@ -415,6 +416,17 @@ function createSupabaseSource(client: SupabaseClient): CommunitySource {
         p_project_id: query.projectId,
         p_kind: query.kind,
         p_author: query.author,
+      })
+      return Array.isArray(data) ? data.flatMap((row) => parsePost(row, publicUrl) ?? []) : []
+    },
+
+    async listPostsForProject(projectId) {
+      const cleanProjectId = projectId.trim()
+      if (!cleanProjectId) throw new Error("A project ID is required to load discussions.")
+      const data = await rpc("community_posts_for_project", {
+        p_project_id: cleanProjectId,
+        p_limit: 50,
+        p_offset: 0,
       })
       return Array.isArray(data) ? data.flatMap((row) => parsePost(row, publicUrl) ?? []) : []
     },

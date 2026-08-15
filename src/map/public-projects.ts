@@ -4,6 +4,7 @@ import {
   parseProjectDetail,
   parseViewportPayload,
   type ProjectDetail,
+  type ProjectDisplayGeometry,
   type ViewportBounds,
   type ViewportResponse,
 } from "./map-contract"
@@ -55,9 +56,14 @@ export const SATELLITE_STYLE: StyleSpecification = {
 
 export function getMapStyle(
   configuredStyleUrl: string | undefined = import.meta.env.VITE_MAP_STYLE_URL,
+  mapTilerKey: string | undefined = import.meta.env.VITE_MAPTILER_KEY,
 ): string | StyleSpecification {
   const value = configuredStyleUrl?.trim()
-  return value || SATELLITE_STYLE
+  if (value) return value
+  const key = mapTilerKey?.trim()
+  return key
+    ? `https://api.maptiler.com/maps/hybrid/style.json?key=${encodeURIComponent(key)}`
+    : SATELLITE_STYLE
 }
 
 export function createPublicRpcClient(): PublicRpcClient {
@@ -100,4 +106,32 @@ export async function fetchProjectDetail(
   })
   if (error) throw new Error(error.message || "Unable to load project details.")
   return parseProjectDetail(data)
+}
+
+export async function isCurrentUserModerator(
+  client: PublicRpcClient = createPublicRpcClient(),
+): Promise<boolean> {
+  const { data, error } = await client.rpc("is_moderator", {})
+  if (error) return false
+  return data === true
+}
+
+export async function saveReviewedOsmEstimate(
+  input: {
+    projectId: string
+    osmWayId: number
+    geometry: Extract<ProjectDisplayGeometry, { type: "LineString" }>
+    note: string
+  },
+  client: PublicRpcClient = createPublicRpcClient(),
+): Promise<void> {
+  const { error } = await client.rpc("review_project_osm_geometry", {
+    p_project_id: input.projectId,
+    p_osm_way_id: input.osmWayId,
+    p_geometry: input.geometry,
+    p_note: input.note,
+  })
+  if (error) {
+    throw new Error(error.message || "Unable to save the reviewed OSM estimate.")
+  }
 }

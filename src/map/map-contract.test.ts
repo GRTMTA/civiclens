@@ -178,3 +178,47 @@ describe("official project map contract", () => {
     expect(writeProjectSearch("?project=dpwh-1&lat=10.3", null)).toBe("")
   })
 })
+
+
+describe("reviewed estimate map contract", () => {
+  it("preserves reviewed OSM provenance without promoting it to official", () => {
+    const viewport = parseViewportPayload({
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        id: "dpwh-reviewed",
+        geometry: {
+          type: "LineString",
+          coordinates: [[123.9, 10.3], [123.901, 10.301]],
+        },
+        properties: {
+          id: "dpwh-reviewed",
+          name: "Reviewed route",
+          recorded_coordinates: [123.9, 10.3],
+          geometry_kind: "reviewed_estimate",
+          geometry_source: "OpenStreetMap contributors",
+          geometry_source_url: "https://www.openstreetmap.org/way/123",
+        },
+      }],
+    })
+    const detail = parseProjectDetail({
+      id: "dpwh-reviewed",
+      name: "Reviewed route",
+      latitude: 10.3,
+      longitude: 123.9,
+      geometry_kind: "reviewed_estimate",
+      geometry_reviewed_at: "2026-08-16T01:00:00Z",
+      geometry_review_note: "Checked against contract location",
+    })
+
+    expect(viewport.features[0]).toMatchObject({
+      geometryKind: "reviewed_estimate",
+      geometrySourceUrl: "https://www.openstreetmap.org/way/123",
+    })
+    expect(detail).toMatchObject({
+      geometryKind: "reviewed_estimate",
+      geometryReviewedAt: "2026-08-16T01:00:00Z",
+      geometryReviewNote: "Checked against contract location",
+    })
+  })
+})

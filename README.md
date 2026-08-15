@@ -10,7 +10,7 @@ CivicLens is a Cebu City transparency PWA using Supabase Auth, Postgres/PostGIS,
 4. Add server secrets with `supabase secrets set GROQ_API_KEY=... GROQ_MODEL=qwen/qwen3.6-27b`
 5. Run the web app with `npm run dev`
 
-Without `GROQ_API_KEY`, scans use a safe demo analysis. Project records are loaded separately through the pinned DPWH importer described below. `VITE_MAP_STYLE_URL` is optional; when omitted, the map uses the attributed no-key satellite fallback described under **Satellite map and project geometry**.
+Without `GROQ_API_KEY`, scans use a safe demo analysis. Project records are loaded separately through the pinned DPWH importer described below. For sharper close-zoom imagery, set a domain-restricted MapTiler Free key in `VITE_MAPTILER_KEY`; `VITE_MAP_STYLE_URL` remains available as a full style override.
 
 ## Architecture
 

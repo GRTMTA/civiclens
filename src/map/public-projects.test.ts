@@ -3,10 +3,12 @@ import {
   fetchProjectDetail,
   fetchViewportProjects,
   getMapStyle,
+  isCurrentUserModerator,
   isMapConfigurationError,
   MapConfigurationError,
   SATELLITE_ATTRIBUTION,
   SATELLITE_STYLE,
+  saveReviewedOsmEstimate,
 } from "./public-projects"
 
 describe("public project data seam", () => {
@@ -19,9 +21,12 @@ describe("public project data seam", () => {
   })
 
   it("uses the no-key attributed satellite style unless an override is set", () => {
-    expect(getMapStyle("")).toBe(SATELLITE_STYLE)
-    expect(getMapStyle("   ")).toBe(SATELLITE_STYLE)
-    expect(getMapStyle("https://maps.example/style.json")).toBe(
+    expect(getMapStyle("", "")).toBe(SATELLITE_STYLE)
+    expect(getMapStyle("   ", "   ")).toBe(SATELLITE_STYLE)
+    expect(getMapStyle("", "free-key")).toBe(
+      "https://api.maptiler.com/maps/hybrid/style.json?key=free-key",
+    )
+    expect(getMapStyle("https://maps.example/style.json", "free-key")).toBe(
       "https://maps.example/style.json",
     )
 
@@ -120,5 +125,51 @@ describe("public project data seam", () => {
         geometrySourceUrl: "https://example.gov.ph/plan",
       }),
     )
+  })
+})
+
+
+describe("reviewed OSM geometry RPC seam", () => {
+  it("checks moderator status without treating RPC failures as authorization", async () => {
+    await expect(
+      isCurrentUserModerator({ rpc: async () => ({ data: true, error: null }) }),
+    ).resolves.toBe(true)
+    await expect(
+      isCurrentUserModerator({ rpc: async () => ({ data: null, error: { message: "signed out" } }) }),
+    ).resolves.toBe(false)
+  })
+
+  it("submits only reviewed line geometry and provenance fields", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+    await saveReviewedOsmEstimate(
+      {
+        projectId: "dpwh-1",
+        osmWayId: 123,
+        geometry: {
+          type: "LineString",
+          coordinates: [[123.9, 10.3], [123.901, 10.301]],
+        },
+        note: "Checked against the contract location",
+      },
+      {
+        rpc: async (name, args) => {
+          calls.push({ name, args })
+          return { data: null, error: null }
+        },
+      },
+    )
+
+    expect(calls).toEqual([{
+      name: "review_project_osm_geometry",
+      args: {
+        p_project_id: "dpwh-1",
+        p_osm_way_id: 123,
+        p_geometry: {
+          type: "LineString",
+          coordinates: [[123.9, 10.3], [123.901, 10.301]],
+        },
+        p_note: "Checked against the contract location",
+      },
+    }])
   })
 })

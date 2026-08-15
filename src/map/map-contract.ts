@@ -1,5 +1,5 @@
 export type DisplayStatus = "ongoing" | "completed" | "planned" | "unknown"
-export type GeometryKind = "official" | "estimated"
+export type GeometryKind = "official" | "reviewed_estimate" | "estimated"
 
 type Position = [number, number]
 
@@ -69,6 +69,8 @@ export type ProjectDetail = {
   geometryKind: GeometryKind
   geometrySource?: string
   geometrySourceUrl?: string
+  geometryReviewedAt?: string
+  geometryReviewNote?: string
 }
 
 type RecordValue = Record<string, unknown>
@@ -165,6 +167,11 @@ export function areaSelectionKind(
   return count === 0 ? "none" : count === 1 ? "direct" : "choose"
 }
 
+function asGeometryKind(value: unknown): GeometryKind {
+  if (value === "official" || value === "reviewed_estimate") return value
+  return "estimated"
+}
+
 export function normalizeOfficialStatus(value: string | null | undefined): DisplayStatus {
   const status = value?.trim().toLowerCase() ?? ""
   const normalized = status.replace(/[_-]+/g, " ")
@@ -228,7 +235,7 @@ export function parseViewportPayload(value: unknown): ViewportResponse {
         displayStatus: normalizeOfficialStatus(asString(properties.status)),
         coordinates,
         displayGeometry,
-        geometryKind: properties.geometry_kind === "official" ? "official" : "estimated",
+        geometryKind: asGeometryKind(properties.geometry_kind),
         geometrySource: asOptionalString(properties.geometry_source),
         geometrySourceUrl: asOptionalString(properties.geometry_source_url),
       },
@@ -275,9 +282,11 @@ export function parseProjectDetail(value: unknown): ProjectDetail | null {
     infrastructureYear: asOptionalString(project.infrastructure_year),
     programName: asOptionalString(project.program_name),
     sourceOfFunds: asOptionalString(project.source_of_funds),
-    geometryKind: project.geometry_kind === "official" ? "official" : "estimated",
+    geometryKind: asGeometryKind(project.geometry_kind),
     geometrySource: asOptionalString(project.geometry_source),
     geometrySourceUrl: asOptionalString(project.geometry_source_url),
+    geometryReviewedAt: asOptionalString(project.geometry_reviewed_at),
+    geometryReviewNote: asOptionalString(project.geometry_review_note),
   }
 }
 

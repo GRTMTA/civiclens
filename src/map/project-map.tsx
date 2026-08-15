@@ -1,3 +1,4 @@
+import { Tabs } from "radix-ui"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Map as MapLibre,
@@ -7,7 +8,7 @@ import {
   type MapLayerMouseEvent,
   type MapRef,
 } from "react-map-gl/maplibre"
-import type { GeoJSONSource } from "maplibre-gl"
+import type { ExpressionSpecification, GeoJSONSource } from "maplibre-gl"
 import {
   AlertCircle,
   CheckCircle2,
@@ -16,13 +17,18 @@ import {
   LocateFixed,
   MapPinned,
   RefreshCw,
+  Route,
   Search,
-  X,
 } from "lucide-react"
+
+import { PostCard } from "@/community/post-card"
+import { getCommunitySource } from "@/community/community-data"
+import type { CommunityPost } from "@/community/community-contract"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Sheet,
   SheetContent,
@@ -39,9 +45,16 @@ import {
   fetchProjectDetail,
   fetchViewportProjects,
   getMapStyle,
+  isCurrentUserModerator,
   isMapConfigurationError,
+  saveReviewedOsmEstimate,
   type PublicRpcClient,
 } from "./public-projects"
+import { MapDialog } from "./map-dialog"
+import {
+  fetchOsmRoadCandidates,
+  type OsmRoadCandidate,
+} from "./osm-road-candidates"
 import {
   areaSelectionKind,
   readMapUrlState,
@@ -173,16 +186,22 @@ function StatusBadge({ status }: { status: DisplayStatus }) {
 }
 
 function GeometryBadge({ kind }: { kind: GeometryKind }) {
+  const label =
+    kind === "official"
+      ? "Official project geometry"
+      : kind === "reviewed_estimate"
+        ? "Reviewed OSM estimate"
+        : "Estimated project area"
+  const classes =
+    kind === "official"
+      ? "border-sky-300 bg-sky-50 text-sky-950"
+      : kind === "reviewed_estimate"
+        ? "border-amber-300 bg-amber-50 text-amber-950"
+        : "border-slate-300 bg-white/90 text-slate-800"
+
   return (
-    <Badge
-      variant="outline"
-      className={
-        kind === "official"
-          ? "border-sky-300 bg-sky-50 text-sky-950"
-          : "border-slate-300 bg-white/90 text-slate-800"
-      }
-    >
-      {kind === "official" ? "Official project geometry" : "Estimated project area"}
+    <Badge variant="outline" className={classes}>
+      {label}
     </Badge>
   )
 }
@@ -343,18 +362,173 @@ function ProjectList({
   )
 }
 
+function OsmRoadReviewPanel({
+  detail,
+  onSaved,
+}: {
+  detail: ProjectDetail
+  onSaved: () => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [candidates, setCandidates] = useState<OsmRoadCandidate[]>([])
+  const [selected, setSelected] = useState<OsmRoadCandidate | null>(null)
+  const [note, setNote] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const loadCandidates = async () => {
+    setOpen(true)
+    setLoading(true)
+    setError(null)
+    setSaved(false)
+    try {
+      const next = await fetchOsmRoadCandidates(detail.latitude, detail.longitude, {
+        endpoint: import.meta.env.VITE_OVERPASS_URL,
+      })
+      setCandidates(next)
+      setSelected(next[0] ?? null)
+    } catch (candidateError) {
+      setError(candidateError instanceof Error ? candidateError.message : "Unable to find nearby OSM roads.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const approve = async () => {
+    if (!selected) return
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      await saveReviewedOsmEstimate({
+        projectId: detail.id,
+        osmWayId: selected.osmWayId,
+        geometry: selected.geometry,
+        note: note.trim(),
+      })
+      await onSaved()
+      setSaved(true)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save the reviewed estimate.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <section className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+          <Route className="size-4" aria-hidden="true" /> Moderator geometry review
+        </h3>
+        <p className="text-xs leading-5 text-amber-950/80">
+          Find nearby OpenStreetMap roads and approve one short segment as a reviewed estimate. It will never be labeled official.
+        </p>
+        <Button type="button" size="sm" variant="outline" onClick={() => void loadCandidates()}>
+          Find nearby OSM roads
+        </Button>
+      </section>
+    )
+  }
+
+  return (
+    <section className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3" aria-labelledby="osm-review-heading">
+      <div>
+        <h3 id="osm-review-heading" className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+          <Route className="size-4" aria-hidden="true" /> Review nearby OSM road segments
+        </h3>
+        <p className="mt-1 text-xs leading-5 text-amber-950/80">
+          Candidates are clipped to roughly 300 m around the DPWH point. Confirm the road against project documents before approval.
+        </p>
+      </div>
+
+      {loading && <p className="text-sm text-amber-950" aria-live="polite">Loading nearby roads…</p>}
+      {!loading && candidates.length === 0 && !error && (
+        <p className="text-sm text-amber-950">No mapped roads were found within 100 m.</p>
+      )}
+      {candidates.length > 0 && (
+        <ul className="space-y-2" aria-label="Nearby OpenStreetMap road candidates">
+          {candidates.map((candidate) => (
+            <li key={candidate.osmWayId}>
+              <button
+                type="button"
+                aria-pressed={selected?.osmWayId === candidate.osmWayId}
+                className="w-full rounded-md border bg-white p-2 text-left text-sm aria-pressed:border-amber-600 aria-pressed:ring-2 aria-pressed:ring-amber-300"
+                onClick={() => setSelected(candidate)}
+              >
+                <span className="block font-medium">{candidate.name}</span>
+                <span className="text-xs capitalize text-muted-foreground">
+                  {candidate.highway.replace(/_/g, " ")} · about {candidate.distanceMeters} m from point
+                </span>
+              </button>
+              <a
+                className="mt-1 inline-block text-xs text-amber-900 underline underline-offset-2"
+                href={candidate.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Inspect OSM way {candidate.osmWayId}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {selected && (
+        <div className="space-y-2">
+          <label htmlFor={`osm-review-note-${detail.id}`} className="text-xs font-medium text-amber-950">
+            Review justification
+          </label>
+          <Input
+            id={`osm-review-note-${detail.id}`}
+            value={note}
+            minLength={5}
+            maxLength={500}
+            placeholder="Checked against contract location or project plan"
+            onChange={(event) => setNote(event.target.value)}
+          />
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void approve()}
+            disabled={saving || note.trim().length < 5}
+          >
+            {saving ? "Saving…" : detail.geometryKind === "reviewed_estimate" ? "Replace reviewed estimate" : "Approve reviewed estimate"}
+          </Button>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
+      {saved && (
+        <p className="flex items-center gap-1 text-xs font-medium text-emerald-800" role="status">
+          <CheckCircle2 className="size-4" aria-hidden="true" /> Reviewed estimate saved.
+        </p>
+      )}
+      <p className="text-[11px] leading-4 text-amber-950/70">
+        Road data © OpenStreetMap contributors, ODbL. The request sends only this project coordinate to the configured Overpass service.
+      </p>
+    </section>
+  )
+}
+
 function ProjectDetailContent({
   feature,
   detail,
   loading,
   error,
   onRetry,
+  isModerator,
+  onGeometryReviewed,
 }: {
   feature: ViewportFeature | null
   detail: ProjectDetail | null
   loading: boolean
   error: string | null
   onRetry: () => void
+  isModerator: boolean
+  onGeometryReviewed: () => Promise<void>
 }) {
   if (loading) {
     return (
@@ -395,7 +569,7 @@ function ProjectDetailContent({
   }
 
   return (
-    <div className="space-y-5 overflow-y-auto p-4" tabIndex={-1}>
+    <div className="space-y-5 p-4 sm:p-5" tabIndex={-1}>
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={detail.displayStatus} />
@@ -423,27 +597,51 @@ function ProjectDetailContent({
         <p className="text-sm leading-6 text-muted-foreground">{detail.description}</p>
       )}
 
-      <Alert className={detail.geometryKind === "estimated" ? "border-slate-300 bg-slate-50" : "border-sky-300 bg-sky-50"}>
+      <Alert className={
+        detail.geometryKind === "official"
+          ? "border-sky-300 bg-sky-50"
+          : detail.geometryKind === "reviewed_estimate"
+            ? "border-amber-300 bg-amber-50"
+            : "border-slate-300 bg-slate-50"
+      }>
         <MapPinned aria-hidden="true" />
         <AlertTitle>
-          {detail.geometryKind === "official" ? "Official project geometry" : "Estimated project area"}
-        </AlertTitle>
-        <AlertDescription>
           {detail.geometryKind === "official"
-            ? `This shape was supplied by ${detail.geometrySource ?? "an official source"}.`
-            : "This 50 m area is an estimate around the recorded project coordinate, not an official project boundary."}
-          {detail.geometrySourceUrl && (
-            <a
-              className="ml-1 underline underline-offset-2"
-              href={detail.geometrySourceUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View geometry source
-            </a>
+            ? "Official project geometry"
+            : detail.geometryKind === "reviewed_estimate"
+              ? "Moderator-reviewed OSM estimate"
+              : "Estimated project area"}
+        </AlertTitle>
+        <AlertDescription className="space-y-1">
+          <p>
+            {detail.geometryKind === "official"
+              ? `This shape was supplied by ${detail.geometrySource ?? "an official source"}.`
+              : detail.geometryKind === "reviewed_estimate"
+                ? "A moderator selected this OpenStreetMap road segment as a plausible project route. It is not an official DPWH boundary."
+                : "This 50 m area is an estimate around the recorded project coordinate, not an official project boundary."}
+            {detail.geometrySourceUrl && (
+              <a
+                className="ml-1 underline underline-offset-2"
+                href={detail.geometrySourceUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View geometry source
+              </a>
+            )}
+          </p>
+          {detail.geometryReviewNote && (
+            <p className="text-xs">Review note: {detail.geometryReviewNote}</p>
+          )}
+          {detail.geometryReviewedAt && (
+            <p className="text-xs">Reviewed: {formatDate(detail.geometryReviewedAt)}</p>
           )}
         </AlertDescription>
       </Alert>
+
+      {isModerator && detail.geometryKind !== "official" && (
+        <OsmRoadReviewPanel detail={detail} onSaved={onGeometryReviewed} />
+      )}
 
       <section aria-labelledby="official-details-heading" className="space-y-3">
         <h3 id="official-details-heading" className="font-heading text-sm font-semibold">
@@ -532,7 +730,7 @@ function ProjectDetailContent({
   )
 }
 
-function ProjectDetailPanel({
+function ProjectDetailDialog({
   selectedId,
   feature,
   detail,
@@ -540,7 +738,8 @@ function ProjectDetailPanel({
   error,
   onRetry,
   onClose,
-  mobile = false,
+  isModerator,
+  onGeometryReviewed,
 }: {
   selectedId: string | null
   feature: ViewportFeature | null
@@ -549,56 +748,148 @@ function ProjectDetailPanel({
   error: string | null
   onRetry: () => void
   onClose: () => void
-  mobile?: boolean
+  isModerator: boolean
+  onGeometryReviewed: () => Promise<void>
 }) {
-  if (mobile) {
-    return (
-      <Sheet open={Boolean(selectedId)} onOpenChange={(open) => !open && onClose()}>
-        <SheetContent side="bottom" className="max-h-[85dvh] rounded-t-2xl p-0">
-          <SheetHeader className="border-b pr-14">
-            <SheetTitle>Official project record</SheetTitle>
-            <SheetDescription>
-              Source-attributed details for the selected project.
-            </SheetDescription>
-          </SheetHeader>
+  const [activeTab, setActiveTab] = useState<"details" | "community">("details")
+  const [posts, setPosts] = useState<CommunityPost[]>([])
+  const [postsState, setPostsState] = useState<"idle" | "loading" | "ready" | "error">("idle")
+  const [postsError, setPostsError] = useState<string | null>(null)
+  const postsRequestRef = useRef(0)
+
+  const loadPosts = useCallback(async () => {
+    if (!selectedId) return
+    const requestId = ++postsRequestRef.current
+    setPostsState("loading")
+    setPostsError(null)
+    try {
+      const nextPosts = await getCommunitySource().listPostsForProject(selectedId)
+      if (requestId !== postsRequestRef.current) return
+      setPosts(nextPosts)
+      setPostsState("ready")
+    } catch (postsCause) {
+      if (requestId !== postsRequestRef.current) return
+      setPostsError(
+        postsCause instanceof Error
+          ? postsCause.message
+          : "Unable to load community posts for this project.",
+      )
+      setPostsState("error")
+    }
+  }, [selectedId])
+
+  useEffect(() => {
+    if (activeTab === "community" && postsState === "idle") void loadPosts()
+  }, [activeTab, loadPosts, postsState])
+
+  return (
+    <MapDialog
+      open={Boolean(selectedId)}
+      onOpenChange={(open) => !open && onClose()}
+      size="project"
+      title="Project information"
+      description="Official project details and explicitly linked resident discussions."
+    >
+      <Tabs.Root
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as "details" | "community")}
+        className="flex min-h-0 w-full flex-1 flex-col"
+      >
+        <Tabs.List
+          aria-label="Project information sections"
+          className="grid w-full shrink-0 grid-cols-2 gap-1 border-b border-border px-4 pt-2 sm:px-5"
+        >
+          <Tabs.Trigger
+            value="details"
+            className="flex min-h-11 items-center justify-center rounded-t-md border-b-2 border-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-primary data-[state=active]:text-foreground"
+          >
+            Project details
+          </Tabs.Trigger>
+          <Tabs.Trigger
+            value="community"
+            className="flex min-h-11 items-center justify-center rounded-t-md border-b-2 border-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-primary data-[state=active]:text-foreground"
+          >
+            Community posts
+            {postsState === "ready" && (
+              <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[0.65rem] tabular-nums">
+                {posts.length}
+              </span>
+            )}
+          </Tabs.Trigger>
+        </Tabs.List>
+
+        <Tabs.Content value="details" className="min-h-0 flex-1 overflow-y-auto outline-none">
           <ProjectDetailContent
             feature={feature}
             detail={detail}
             loading={loading}
             error={error}
             onRetry={onRetry}
+            isModerator={isModerator}
+            onGeometryReviewed={onGeometryReviewed}
           />
-        </SheetContent>
-      </Sheet>
-    )
-  }
+        </Tabs.Content>
 
-  if (!selectedId) return null
-  return (
-    <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card" aria-label="Selected official project">
-      <div className="flex items-center justify-between border-b p-4">
-        <div>
-          <h2 className="font-heading text-base font-semibold">Project details</h2>
-          <p className="text-xs text-muted-foreground">Official-source record</p>
-        </div>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close project details">
-          <X aria-hidden="true" />
-        </Button>
-      </div>
-      <ProjectDetailContent
-        feature={feature}
-        detail={detail}
-        loading={loading}
-        error={error}
-        onRetry={onRetry}
-      />
-    </section>
+        <Tabs.Content
+          value="community"
+          className="min-h-0 flex-1 overflow-y-auto p-4 outline-none sm:p-5"
+        >
+          <div className="mb-4 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground">
+            These are resident discussions explicitly linked to this project. They are not official project updates or verified findings.
+          </div>
+
+          {postsState === "loading" && (
+            <div className="space-y-3" aria-label="Loading project community posts">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-32 w-full rounded-lg" />
+              ))}
+            </div>
+          )}
+
+          {postsState === "error" && (
+            <Alert variant="destructive">
+              <AlertCircle aria-hidden="true" />
+              <AlertTitle>Community posts unavailable</AlertTitle>
+              <AlertDescription className="space-y-3">
+                <p>{postsError}</p>
+                <Button type="button" size="sm" variant="outline" onClick={() => void loadPosts()}>
+                  <RefreshCw aria-hidden="true" /> Retry
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {postsState === "ready" && posts.length === 0 && (
+            <div className="rounded-lg border border-dashed border-border px-5 py-12 text-center">
+              <p className="text-sm font-medium">No community posts for this project yet</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                Discussions appear here only when residents explicitly link them to this project.
+              </p>
+            </div>
+          )}
+
+          {postsState === "ready" && posts.length > 0 && (
+            <div className="space-y-3" aria-label="Community posts linked to this project">
+              {posts.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onVote={() => undefined}
+                  canInteract={false}
+                />
+              ))}
+            </div>
+          )}
+        </Tabs.Content>
+      </Tabs.Root>
+    </MapDialog>
   )
 }
 
 const AREA_INTERACTIVE_LAYER_IDS = [
   "project-area-official",
   "project-area-official-fill",
+  "project-area-reviewed",
   "project-area-estimated-fill",
   "project-area-estimated-outline",
 ]
@@ -677,7 +968,7 @@ function OfficialProjectMap({
     [featuresById, mapRef, onSelect],
   )
 
-  const statusColor = [
+  const statusColor: ExpressionSpecification = [
     "match",
     ["get", "displayStatus"],
     "ongoing",
@@ -687,7 +978,7 @@ function OfficialProjectMap({
     "planned",
     "#6366f1",
     "#64748b",
-  ] as const
+  ]
 
   return (
     <>
@@ -809,6 +1100,18 @@ function OfficialProjectMap({
             }}
           />
           <Layer
+            id="project-area-reviewed"
+            type="line"
+            minzoom={15}
+            filter={["==", ["get", "geometryKind"], "reviewed_estimate"]}
+            paint={{
+              "line-color": statusColor,
+              "line-width": 7,
+              "line-opacity": 0.95,
+              "line-dasharray": [3, 1],
+            }}
+          />
+          <Layer
             id="project-area-official-fill"
             type="fill"
             minzoom={15}
@@ -843,42 +1146,37 @@ function OfficialProjectMap({
         </Source>
       </MapLibre>
 
-      <Sheet
+      <MapDialog
         open={overlapChoices.length > 0}
         onOpenChange={(open) => !open && setOverlapChoices([])}
+        size="chooser"
+        title="Choose a project"
+        description="Multiple highlighted project areas overlap here."
       >
-        <SheetContent side="bottom" className="max-h-[70dvh] rounded-t-2xl p-0 sm:mx-auto sm:max-w-xl">
-          <SheetHeader className="border-b pr-14">
-            <SheetTitle>Choose a project</SheetTitle>
-            <SheetDescription>
-              Multiple highlighted project areas overlap here.
-            </SheetDescription>
-          </SheetHeader>
-          <ul className="overflow-y-auto p-3" aria-label="Overlapping infrastructure projects">
-            {overlapChoices.map((feature) => (
-              <li key={feature.id}>
-                <button
-                  type="button"
-                  className="w-full rounded-lg border border-transparent p-3 text-left hover:border-border hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => {
-                    setOverlapChoices([])
-                    onSelect(feature)
-                  }}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <span className="font-medium">{feature.name}</span>
-                    <StatusBadge status={feature.displayStatus} />
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="capitalize">{feature.category}</span>
-                    <GeometryBadge kind={feature.geometryKind} />
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </SheetContent>
-      </Sheet>
+        <ul className="min-h-0 flex-1 overflow-y-auto p-3" aria-label="Overlapping infrastructure projects">
+          {overlapChoices.map((feature) => (
+            <li key={feature.id}>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-transparent p-3 text-left hover:border-border hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => {
+                  setOverlapChoices([])
+                  onSelect(feature)
+                }}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <span className="font-medium">{feature.name}</span>
+                  <StatusBadge status={feature.displayStatus} />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="capitalize">{feature.category}</span>
+                  <GeometryBadge kind={feature.geometryKind} />
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </MapDialog>
     </>
   )
 }
@@ -904,6 +1202,7 @@ export function ProjectMapSurface() {
   const [detail, setDetail] = useState<ProjectDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
+  const [isModerator, setIsModerator] = useState(false)
   const [listOpen, setListOpen] = useState(false)
   const mapRef = useRef<MapRef | null>(null)
   const clientRef = useRef<PublicRpcClient | null>(null)
@@ -941,6 +1240,21 @@ export function ProjectMapSurface() {
   useEffect(() => {
     void loadViewport(DEFAULT_BOUNDS)
   }, [loadViewport])
+
+  useEffect(() => {
+    let active = true
+    const checkModerator = async () => {
+      try {
+        if (!clientRef.current) clientRef.current = createPublicRpcClient()
+        const moderator = await isCurrentUserModerator(clientRef.current)
+        if (active) setIsModerator(moderator)
+      } catch {
+        if (active) setIsModerator(false)
+      }
+    }
+    void checkModerator()
+    return () => { active = false }
+  }, [])
 
   useEffect(
     () => () => {
@@ -984,6 +1298,13 @@ export function ProjectMapSurface() {
       setDetailLoading(false)
     }
   }, [loadDetails, selectedId])
+
+  const refreshReviewedGeometry = useCallback(async () => {
+    await Promise.all([
+      loadDetails(),
+      loadViewport(lastBoundsRef.current),
+    ])
+  }, [loadDetails, loadViewport])
 
   useEffect(() => {
     const onPopState = () => {
@@ -1113,6 +1434,10 @@ export function ProjectMapSurface() {
                 <span>Official project geometry</span>
               </div>
               <div className="flex items-center gap-2">
+                <span className="w-7 border-t-[3px] border-dashed border-amber-600" aria-hidden="true" />
+                <span>Reviewed OSM estimate</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <span className="h-2 w-7 rounded-sm border-2 border-dashed border-slate-600 bg-slate-300/40" aria-hidden="true" />
                 <span>Estimated 50 m project area</span>
               </div>
@@ -1131,15 +1456,6 @@ export function ProjectMapSurface() {
             onRetry={() => void loadViewport(lastBoundsRef.current)}
             queryError={queryError}
             configurationRequired={queryState === "configuration"}
-          />
-          <ProjectDetailPanel
-            selectedId={selectedId}
-            feature={selectedFeature}
-            detail={detail}
-            loading={detailLoading}
-            error={detailError}
-            onRetry={() => void loadDetails()}
-            onClose={closeProject}
           />
         </aside>
       </div>
@@ -1176,7 +1492,8 @@ export function ProjectMapSurface() {
           </div>
         </SheetContent>
       </Sheet>
-      <ProjectDetailPanel
+      <ProjectDetailDialog
+        key={selectedId ?? "closed-project"}
         selectedId={selectedId}
         feature={selectedFeature}
         detail={detail}
@@ -1184,7 +1501,8 @@ export function ProjectMapSurface() {
         error={detailError}
         onRetry={() => void loadDetails()}
         onClose={closeProject}
-        mobile
+        isModerator={isModerator}
+        onGeometryReviewed={refreshReviewedGeometry}
       />
     </div>
   )
