@@ -13,9 +13,11 @@ import { VoteControl } from "./vote-control"
 export function PostCard({
   post,
   onVote,
+  canInteract = true,
 }: {
   post: CommunityPost
   onVote: (direction: 1 | -1) => void
+  canInteract?: boolean
 }) {
   const href = `/community/post/${post.id}`
 
@@ -28,6 +30,7 @@ export function PostCard({
             vote={post.viewerVote}
             onVote={onVote}
             label={post.title}
+            canInteract={canInteract}
           />
         </div>
 

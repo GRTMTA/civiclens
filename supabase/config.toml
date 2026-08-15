@@ -21,7 +21,14 @@ enabled = true
 site_url = "http://localhost:5173"
 additional_redirect_urls = ["http://127.0.0.1:5173"]
 enable_signup = true
-enable_email_confirmations = false
+
+[auth.email]
+# Renamed from the former top-level `auth.enable_email_confirmations`, which
+# current CLI versions reject outright ("'auth' has invalid keys").
+# This setting applies to `supabase start` only; the hosted project's own
+# confirmation setting is managed in the dashboard. `src/main.tsx` handles both
+# cases, treating a null session after sign-up as "check your email".
+enable_confirmations = false
 
 [storage]
 enabled = true

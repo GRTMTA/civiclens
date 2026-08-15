@@ -49,6 +49,7 @@ export function CreatePostModal({
   const [topic, setTopic] = useState<TopicId>("infrastructure")
   const [relatedProjectId, setRelatedProjectId] = useState("")
   const [projects, setProjects] = useState<ProjectReference[]>([])
+  const [projectsState, setProjectsState] = useState<"loading" | "ready" | "error">("loading")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -62,15 +63,27 @@ export function CreatePostModal({
     setRelatedProjectId("")
     setError(null)
     setSubmitting(false)
+    setProjectsState("loading")
     let cancelled = false
-    getCommunitySource()
-      .searchProjects("")
-      .then((next) => {
-        if (!cancelled) setProjects(next)
-      })
-      .catch(() => {
-        if (!cancelled) setProjects([])
-      })
+    // A failure here must not block posting: the project link is optional, so
+    // the selector degrades to "no related project" rather than erroring.
+    try {
+      getCommunitySource()
+        .searchProjects("")
+        .then((next) => {
+          if (cancelled) return
+          setProjects(next)
+          setProjectsState("ready")
+        })
+        .catch(() => {
+          if (cancelled) return
+          setProjects([])
+          setProjectsState("error")
+        })
+    } catch {
+      setProjects([])
+      setProjectsState("error")
+    }
     return () => {
       cancelled = true
     }
@@ -215,9 +228,12 @@ export function CreatePostModal({
                   id={projectId}
                   value={relatedProjectId}
                   onChange={(event) => setRelatedProjectId(event.target.value)}
+                  disabled={projectsState === "loading"}
                   className={cn(textFieldClass, "h-10 appearance-none pr-8")}
                 >
-                  <option value="">No related project</option>
+                  <option value="">
+                    {projectsState === "loading" ? "Loading projects…" : "No related project"}
+                  </option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
@@ -225,8 +241,11 @@ export function CreatePostModal({
                   ))}
                 </select>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  Linking a project marks this as a discussion about that record. It does not add
-                  your post to the official record.
+                  {projectsState === "error"
+                    ? "Project records could not be loaded, so this post will not reference one."
+                    : projectsState === "ready" && projects.length === 0
+                      ? "No official project records are available to reference yet."
+                      : "Linking a project marks this as a discussion about that record. It does not add your post to the official record."}
                 </p>
               </div>
 

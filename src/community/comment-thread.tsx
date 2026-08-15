@@ -100,11 +100,13 @@ function Comment({
   depth,
   onVote,
   onReply,
+  canInteract,
 }: {
   comment: CommentNode
   depth: number
   onVote: (commentId: string, direction: 1 | -1) => void
   onReply: (body: string, parentId: string) => Promise<void>
+  canInteract: boolean
 }) {
   const [replying, setReplying] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -146,17 +148,20 @@ function Comment({
             label={`comment by ${comment.authorName}`}
             orientation="horizontal"
             size="sm"
+            canInteract={canInteract}
           />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="rounded-md text-muted-foreground"
-            onClick={() => setReplying((value) => !value)}
-            aria-expanded={replying}
-          >
-            <MessageSquare aria-hidden="true" />
-            Reply
-          </Button>
+          {canInteract && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-md text-muted-foreground"
+              onClick={() => setReplying((value) => !value)}
+              aria-expanded={replying}
+            >
+              <MessageSquare aria-hidden="true" />
+              Reply
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -196,6 +201,7 @@ function Comment({
               depth={depth + 1}
               onVote={onVote}
               onReply={onReply}
+              canInteract={canInteract}
             />
           ))}
         </ul>
@@ -214,22 +220,35 @@ export function CommentThread({
   onVote,
   onReply,
   composerId,
+  canInteract = true,
 }: {
   comments: CommentNode[]
   commentCount: number
   onVote: (commentId: string, direction: 1 | -1) => void
   onReply: (body: string, parentId: string | null) => Promise<void>
   composerId?: string
+  canInteract?: boolean
 }) {
   return (
     <section aria-label="Discussion comments" className="space-y-5">
-      <ReplyComposer
-        label="Add a comment to this discussion"
-        placeholder="Add your observation or question…"
-        submitLabel="Comment"
-        composerId={composerId}
-        onSubmit={(body) => onReply(body, null)}
-      />
+      {canInteract ? (
+        <ReplyComposer
+          label="Add a comment to this discussion"
+          placeholder="Add your observation or question…"
+          submitLabel="Comment"
+          composerId={composerId}
+          onSubmit={(body) => onReply(body, null)}
+        />
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border bg-secondary/40 px-4 py-3.5">
+          <p className="text-sm text-muted-foreground">
+            Sign in to join this discussion.
+          </p>
+          <Button variant="outline" size="sm" asChild>
+            <a href="/login">Sign in</a>
+          </Button>
+        </div>
+      )}
 
       <h2 className="text-sm font-semibold">
         {commentCount} {commentCount === 1 ? "comment" : "comments"}
@@ -237,7 +256,9 @@ export function CommentThread({
 
       {comments.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border bg-secondary/40 p-5 text-center text-sm text-muted-foreground">
-          No comments yet. Start the discussion.
+          {canInteract
+            ? "No comments yet. Start the discussion."
+            : "No comments yet."}
         </p>
       ) : (
         <ul className="space-y-3">
@@ -248,6 +269,7 @@ export function CommentThread({
               depth={0}
               onVote={onVote}
               onReply={onReply}
+              canInteract={canInteract}
             />
           ))}
         </ul>

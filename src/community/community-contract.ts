@@ -188,37 +188,9 @@ export function formatScore(score: number): string {
   return `${value.replace(/\.0$/, "")}k`
 }
 
-/** Sorts a feed for the selected option without mutating the input. */
-export function sortPosts(posts: CommunityPost[], sort: SortOption): CommunityPost[] {
-  const byNewest = (a: CommunityPost, b: CommunityPost) =>
-    new Date(b.createdAt).valueOf() - new Date(a.createdAt).valueOf()
-
-  const sorted = [...posts]
-  if (sort === "new") return sorted.sort(byNewest)
-  if (sort === "discussed") {
-    return sorted.sort((a, b) => b.commentCount - a.commentCount || byNewest(a, b))
-  }
-  return sorted.sort((a, b) => b.score - a.score || byNewest(a, b))
-}
-
-/** Case-insensitive match across title, body, topic label, and project name. */
-export function matchesSearch(post: CommunityPost, search: string): boolean {
-  const term = search.trim().toLowerCase()
-  if (!term) return true
-  return [post.title, post.body, topicLabel(post.topic), post.project?.name ?? ""]
-    .join(" ")
-    .toLowerCase()
-    .includes(term)
-}
-
-export function selectPosts(posts: CommunityPost[], query: FeedQuery): CommunityPost[] {
-  const filtered = posts.filter(
-    (post) =>
-      (query.topic === null || post.topic === query.topic) &&
-      matchesSearch(post, query.search),
-  )
-  return sortPosts(filtered, query.sort)
-}
+// Sorting, searching, and topic filtering are performed by the
+// `community_feed` RPC so a growing feed is not fetched in full and paged
+// client-side. `FeedQuery` above is the shape passed through to it.
 
 export type PostValidationError = {
   field: "title" | "body"

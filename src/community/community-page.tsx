@@ -24,7 +24,7 @@ export function CommunityPage() {
       onSortChange={feed.setSort}
       topic={feed.topic}
       onTopicChange={feed.setTopic}
-      isSampleContent={feed.isSampleContent}
+      showSignInNotice={feed.viewerReady && !feed.canInteract && feed.state !== "unconfigured"}
     >
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_19rem] xl:gap-5">
         <main className="min-w-0">
@@ -40,6 +40,8 @@ export function CommunityPage() {
             onTopicChange={feed.setTopic}
             onVote={feed.vote}
             onCreatePost={() => setComposerOpen(true)}
+            onRetry={feed.retry}
+            canInteract={feed.canInteract}
           />
         </main>
 

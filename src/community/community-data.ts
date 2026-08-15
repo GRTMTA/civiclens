@@ -1,20 +1,20 @@
 /**
  * Community data access.
  *
- * The repository has no community discussion tables yet — `reports` and
- * `report_comments` model Community observations against a specific Project,
- * which is a different thing from open discussion. So this module ships a
- * seeded source and keeps the surface area of the data contract narrow:
- * swapping in a Supabase-backed `CommunitySource` later requires no UI change.
+ * Backed by the community tables and RPCs added in
+ * `supabase/migrations/20260815000000_community_discussions.sql`. Scores,
+ * comment counts, and the caller's own vote are aggregated server-side, so this
+ * module only parses and shapes what the RPCs return.
  *
- * `isSampleContent` is exposed so the UI can say plainly that the discussion
- * shown is sample content rather than live resident activity.
+ * Reading is available without an account; writing and voting require a signed
+ * in resident, which the RPC grants enforce.
  */
 
+import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+
 import {
-  applyVote,
   buildCommentTree,
-  selectPosts,
+  COMMUNITY_TOPICS,
   type CommentNode,
   type CommunityComment,
   type CommunityPost,
@@ -22,12 +22,38 @@ import {
   type NewCommentInput,
   type NewPostInput,
   type ProjectReference,
+  type TopicId,
   type VoteState,
 } from "./community-contract"
 
+export class CommunityConfigurationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "CommunityConfigurationError"
+  }
+}
+
+export function isCommunityConfigurationError(
+  error: unknown,
+): error is CommunityConfigurationError {
+  return error instanceof CommunityConfigurationError
+}
+
+/** Raised when an action requires a signed-in resident. */
+export class CommunityAuthRequiredError extends Error {
+  constructor(message = "Sign in to take part in community discussion.") {
+    super(message)
+    this.name = "CommunityAuthRequiredError"
+  }
+}
+
+export function isCommunityAuthRequiredError(
+  error: unknown,
+): error is CommunityAuthRequiredError {
+  return error instanceof CommunityAuthRequiredError
+}
+
 export type CommunitySource = {
-  /** True when the returned content is seeded sample data, not resident activity. */
-  readonly isSampleContent: boolean
   listPosts(query: FeedQuery): Promise<CommunityPost[]>
   getPost(postId: string): Promise<CommunityPost | null>
   listComments(postId: string): Promise<CommentNode[]>
@@ -40,399 +66,239 @@ export type CommunitySource = {
   ): Promise<{ score: number; viewerVote: VoteState }>
   /** Projects a resident can optionally relate a discussion to. */
   searchProjects(term: string): Promise<ProjectReference[]>
+  /** Resolves the signed-in resident, or null when browsing anonymously. */
+  getViewer(): Promise<{ id: string; name: string } | null>
 }
 
-function hoursAgo(hours: number): string {
-  return new Date(Date.now() - hours * 3600_000).toISOString()
+// ── Parsing ──────────────────────────────────────────────────────────────────
+
+type Row = Record<string, unknown>
+
+function asRecord(value: unknown): Row | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Row)
+    : null
 }
 
-const SEED_PROJECTS: ProjectReference[] = [
-  { id: "sample-ccl-expressway", name: "Cebu–Cordova Link Expressway" },
-  { id: "sample-mandaue-bridge", name: "Mandaue–Mactan Bridge Rehabilitation" },
-  { id: "sample-barangay-road", name: "Barangay Road Improvement" },
-  { id: "sample-drainage-mabolo", name: "Mabolo Drainage Improvement" },
-  { id: "sample-flood-control-butuanon", name: "Butuanon River Flood Control" },
-  { id: "sample-transport-terminal", name: "South Bus Terminal Modernization" },
-]
+function asString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback
+}
 
-const SEED_POSTS: CommunityPost[] = [
-  {
-    id: "sample-post-1",
-    title: "Why has the construction of this bridge stopped?",
-    body: "I pass this area on the way to work and the equipment has not moved for a few weeks now. The barriers are still up and one lane is closed. Does anyone know whether this is a scheduled pause, or where residents can check the current schedule?",
-    authorName: "CivicLens Resident",
-    createdAt: hoursAgo(3),
-    topic: "bridges",
-    score: 184,
-    commentCount: 4,
-    viewerVote: 0,
-    project: SEED_PROJECTS[1],
-  },
-  {
-    id: "sample-post-2",
-    title: "Anyone else notice the drainage project along this road?",
-    body: "There is new concrete work along the roadside and the old canal cover has been replaced. I am curious what the finished design is supposed to look like, and whether the sidewalk will be restored afterwards.",
-    authorName: "CivicLens Resident",
-    createdAt: hoursAgo(9),
-    topic: "flood-control",
-    score: 96,
-    commentCount: 2,
-    viewerVote: 0,
-    project: SEED_PROJECTS[3],
-  },
-  {
-    id: "sample-post-3",
-    title: "Where can we find the official budget for this project?",
-    body: "The signboard lists a contractor and a completion date but the amount is hard to read from the road. Is the contract amount published somewhere residents can look up, so we are reading the official record instead of guessing?",
-    authorName: "CivicLens Resident",
-    createdAt: hoursAgo(21),
-    topic: "local-government",
-    score: 143,
-    commentCount: 3,
-    viewerVote: 0,
-    project: null,
-  },
-  {
-    id: "sample-post-4",
-    title: "This road improvement project looks almost complete",
-    body: "Most of the surface has been paved and the line markings went in this week. Sharing an observation for anyone tracking this stretch — the shoulder near the corner still looks unfinished.",
-    authorName: "CivicLens Resident",
-    createdAt: hoursAgo(30),
-    topic: "roads",
-    score: 71,
-    commentCount: 2,
-    viewerVote: 0,
-    project: SEED_PROJECTS[2],
-  },
-  {
-    id: "sample-post-5",
-    title: "Does anyone know when this flood-control project is expected to finish?",
-    body: "The riverbank work has been going on for a while. Last rainy season the water still reached the road, so I am interested in what the official completion date is and what the project is scoped to cover.",
-    authorName: "CivicLens Resident",
-    createdAt: hoursAgo(44),
-    topic: "flood-control",
-    score: 128,
-    commentCount: 3,
-    viewerVote: 0,
-    project: SEED_PROJECTS[4],
-  },
-  {
-    id: "sample-post-6",
-    title: "What happens to the old terminal building during the rebuild?",
-    body: "Passengers are being routed through a temporary area and it gets crowded in the afternoon. Wondering whether the temporary arrangement is part of the published plan or something that changed on site.",
-    authorName: "CivicLens Resident",
-    createdAt: hoursAgo(58),
-    topic: "transportation",
-    score: 54,
-    commentCount: 1,
-    viewerVote: 0,
-    project: SEED_PROJECTS[5],
-  },
-  {
-    id: "sample-post-7",
-    title: "How do residents read a project signboard properly?",
-    body: "A short guide would help. I can see a contract identifier and dates but I am not sure which of those describe the official record and which describe the contractor's own schedule.",
-    authorName: "CivicLens Resident",
-    createdAt: hoursAgo(76),
-    topic: "infrastructure",
-    score: 112,
-    commentCount: 2,
-    viewerVote: 0,
-    project: null,
-  },
-  {
-    id: "sample-post-8",
-    title: "Is the covered walkway at this public building part of the same project?",
-    body: "The main building looks finished but there is separate work happening at the entrance. Curious whether that is a second record or the same one continuing.",
-    authorName: "CivicLens Resident",
-    createdAt: hoursAgo(94),
-    topic: "public-buildings",
-    score: 38,
-    commentCount: 1,
-    viewerVote: 0,
-    project: null,
-  },
-]
+function asNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  // Postgres sum()/count() arrive as strings over PostgREST.
+  if (typeof value === "string") {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return fallback
+}
 
-const SEED_COMMENTS: CommunityComment[] = [
-  {
-    id: "sample-comment-1",
-    postId: "sample-post-1",
-    parentId: null,
-    authorName: "resident_cebu",
-    body: "I pass this road every day and noticed the same thing. The night lighting is still set up, so it looks like the site is meant to be active.",
-    createdAt: hoursAgo(2),
-    score: 21,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-2",
-    postId: "sample-post-1",
-    parentId: "sample-comment-1",
-    authorName: "jomar_p",
-    body: "Same here. The contractor's signboard lists a completion date, though that describes the official record rather than what is happening on site right now.",
-    createdAt: hoursAgo(1),
-    score: 8,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-3",
-    postId: "sample-post-1",
-    parentId: "sample-comment-2",
-    authorName: "resident_cebu",
-    body: "That is a fair distinction. Worth checking the official record before anyone assumes a reason for the pause.",
-    createdAt: hoursAgo(1),
-    score: 5,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-4",
-    postId: "sample-post-1",
-    parentId: null,
-    authorName: "mapper_ph",
-    body: "For what it is worth, the project appears on the map with its documented location. That is a good starting point for comparing what residents are seeing.",
-    createdAt: hoursAgo(2),
-    score: 12,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-5",
-    postId: "sample-post-2",
-    parentId: null,
-    authorName: "ana_reyes",
-    body: "The canal on my side of the street was widened first, then covered. Looks like the same sequence here.",
-    createdAt: hoursAgo(7),
-    score: 14,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-6",
-    postId: "sample-post-2",
-    parentId: "sample-comment-5",
-    authorName: "CivicLens Resident",
-    body: "Thanks, that is useful context. I will take another look at the sidewalk section this weekend.",
-    createdAt: hoursAgo(6),
-    score: 4,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-7",
-    postId: "sample-post-3",
-    parentId: null,
-    authorName: "transparency_ph",
-    body: "The official record usually carries the contract amount and the implementing agency. Reading it straight from the source avoids guessing from the signboard.",
-    createdAt: hoursAgo(18),
-    score: 33,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-8",
-    postId: "sample-post-3",
-    parentId: "sample-comment-7",
-    authorName: "kim_l",
-    body: "Agreed. It also helps to note the date you looked it up, since records get updated.",
-    createdAt: hoursAgo(16),
-    score: 11,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-9",
-    postId: "sample-post-3",
-    parentId: null,
-    authorName: "resident_mandaue",
-    body: "Would be good to have a short explainer on which fields come from the official source.",
-    createdAt: hoursAgo(12),
-    score: 6,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-10",
-    postId: "sample-post-4",
-    parentId: null,
-    authorName: "bikes_daily",
-    body: "The markings look fresh. The shoulder you mentioned is still gravel as of this morning.",
-    createdAt: hoursAgo(24),
-    score: 9,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-11",
-    postId: "sample-post-4",
-    parentId: "sample-comment-10",
-    authorName: "CivicLens Resident",
-    body: "Noted, thanks. That matches what I saw.",
-    createdAt: hoursAgo(22),
-    score: 3,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-12",
-    postId: "sample-post-5",
-    parentId: null,
-    authorName: "flood_watch_ph",
-    body: "The official completion date is the thing to check here. What residents observe on site is a separate account from the record.",
-    createdAt: hoursAgo(40),
-    score: 27,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-13",
-    postId: "sample-post-5",
-    parentId: "sample-comment-12",
-    authorName: "resident_talisay",
-    body: "Right. Last season the water still reached the road near the corner, which is worth documenting as an observation rather than a conclusion.",
-    createdAt: hoursAgo(36),
-    score: 15,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-14",
-    postId: "sample-post-5",
-    parentId: null,
-    authorName: "engr_dela_cruz",
-    body: "Scope matters too — riverbank works and road drainage are often separate records.",
-    createdAt: hoursAgo(30),
-    score: 18,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-15",
-    postId: "sample-post-6",
-    parentId: null,
-    authorName: "commuter_ph",
-    body: "The temporary routing has been in place for a few weeks now. Afternoons are the busiest.",
-    createdAt: hoursAgo(50),
-    score: 7,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-16",
-    postId: "sample-post-7",
-    parentId: null,
-    authorName: "transparency_ph",
-    body: "Short version: the identifier and the dates come from the official record. Anything about current physical progress is an observation.",
-    createdAt: hoursAgo(70),
-    score: 22,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-17",
-    postId: "sample-post-7",
-    parentId: "sample-comment-16",
-    authorName: "new_resident",
-    body: "That distinction cleared it up for me, thank you.",
-    createdAt: hoursAgo(66),
-    score: 6,
-    viewerVote: 0,
-  },
-  {
-    id: "sample-comment-18",
-    postId: "sample-post-8",
-    parentId: null,
-    authorName: "mapper_ph",
-    body: "Entrance works are sometimes filed separately. Checking the record for each is the safest read.",
-    createdAt: hoursAgo(88),
-    score: 5,
-    viewerVote: 0,
-  },
-]
+function asTopic(value: unknown): TopicId {
+  const topic = asString(value)
+  return COMMUNITY_TOPICS.includes(topic as TopicId) ? (topic as TopicId) : "other"
+}
 
-/**
- * In-memory community source seeded with realistic sample discussion.
- *
- * Writes and votes persist for the session so the interactions behave
- * correctly, and are lost on reload. Nothing here reaches a server.
- */
-function createSeededSource(): CommunitySource {
-  const posts: CommunityPost[] = SEED_POSTS.map((post) => ({ ...post }))
-  const comments: CommunityComment[] = SEED_COMMENTS.map((comment) => ({ ...comment }))
+function asVote(value: unknown): VoteState {
+  const vote = asNumber(value)
+  return vote === 1 ? 1 : vote === -1 ? -1 : 0
+}
 
-  const findPost = (postId: string) => posts.find((post) => post.id === postId)
+function parsePost(value: unknown): CommunityPost | null {
+  const row = asRecord(value)
+  const id = asString(row?.id)
+  const title = asString(row?.title)
+  if (!row || !id || !title) return null
 
-  const recount = (postId: string) => {
-    const post = findPost(postId)
-    if (post) {
-      post.commentCount = comments.filter((comment) => comment.postId === postId).length
-    }
+  const projectId = asString(row.project_id)
+  const projectName = asString(row.project_name)
+
+  return {
+    id,
+    title,
+    body: asString(row.body),
+    authorName: asString(row.author_name, "Resident"),
+    createdAt: asString(row.created_at),
+    topic: asTopic(row.topic),
+    score: asNumber(row.score),
+    commentCount: asNumber(row.comment_count),
+    viewerVote: asVote(row.viewer_vote),
+    // Without a resolvable name there is nothing meaningful to show, so the
+    // reference is dropped rather than rendering an empty chip.
+    project: projectId && projectName ? { id: projectId, name: projectName } : null,
+  }
+}
+
+function parseComment(value: unknown): CommunityComment | null {
+  const row = asRecord(value)
+  const id = asString(row?.id)
+  if (!row || !id) return null
+
+  const parentId = asString(row.parent_id)
+  return {
+    id,
+    postId: asString(row.post_id),
+    parentId: parentId || null,
+    authorName: asString(row.author_name, "Resident"),
+    body: asString(row.body),
+    createdAt: asString(row.created_at),
+    score: asNumber(row.score),
+    viewerVote: asVote(row.viewer_vote),
+  }
+}
+
+function parseVote(value: unknown): { score: number; viewerVote: VoteState } {
+  const row = asRecord(value)
+  return { score: asNumber(row?.score), viewerVote: asVote(row?.viewer_vote) }
+}
+
+function parseProjects(value: unknown): ProjectReference[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    const row = asRecord(entry)
+    const id = asString(row?.id)
+    const name = asString(row?.name)
+    return id && name ? [{ id, name }] : []
+  })
+}
+
+/** Raised when the community tables and RPCs are not present in the database. */
+export class CommunitySchemaMissingError extends Error {
+  constructor() {
+    super(
+      "Community discussion is not set up on this database yet. Apply the community migration to enable it.",
+    )
+    this.name = "CommunitySchemaMissingError"
+  }
+}
+
+export function isCommunitySchemaMissingError(
+  error: unknown,
+): error is CommunitySchemaMissingError {
+  return error instanceof CommunitySchemaMissingError
+}
+
+/** Turns a Postgres error into something worth showing a resident. */
+function toFriendlyError(message: string): Error {
+  if (message.includes("community_rate_limit_exceeded")) {
+    return new Error("You have reached the posting limit. Please try again later.")
+  }
+  if (message.includes("authentication required") || message.includes("permission denied")) {
+    return new CommunityAuthRequiredError()
+  }
+  // PostgREST reports an unmigrated database as a missing function/relation.
+  // Surfacing the raw message would read as a bug rather than pending setup.
+  if (
+    message.includes("Could not find the function") ||
+    message.includes("Could not find the table") ||
+    message.includes("schema cache")
+  ) {
+    return new CommunitySchemaMissingError()
+  }
+  return new Error(message)
+}
+
+// ── Supabase-backed source ───────────────────────────────────────────────────
+
+function createSupabaseSource(client: SupabaseClient): CommunitySource {
+  async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
+    const { data, error } = await client.rpc(name, args)
+    if (error) throw toFriendlyError(error.message || `Unable to complete ${name}.`)
+    return data
+  }
+
+  /** Fails fast for actions the RPC grants would reject anyway. */
+  async function requireViewer(): Promise<void> {
+    const { data } = await client.auth.getSession()
+    if (!data.session) throw new CommunityAuthRequiredError()
   }
 
   return {
-    isSampleContent: true,
-
     async listPosts(query) {
-      return selectPosts(posts, query).map((post) => ({ ...post }))
+      const data = await rpc("community_feed", {
+        p_sort: query.sort,
+        p_topic: query.topic,
+        p_search: query.search.trim() || null,
+      })
+      return Array.isArray(data) ? data.flatMap((row) => parsePost(row) ?? []) : []
     },
 
     async getPost(postId) {
-      const post = findPost(postId)
-      return post ? { ...post } : null
+      return parsePost(await rpc("community_post", { p_post_id: postId }))
     },
 
     async listComments(postId) {
-      return buildCommentTree(
-        comments
-          .filter((comment) => comment.postId === postId)
-          .map((comment) => ({ ...comment })),
-      )
+      const data = await rpc("community_comments_for_post", { p_post_id: postId })
+      const comments = Array.isArray(data)
+        ? data.flatMap((row) => parseComment(row) ?? [])
+        : []
+      return buildCommentTree(comments)
     },
 
     async createPost(input) {
-      const post: CommunityPost = {
-        id: `local-post-${crypto.randomUUID()}`,
-        title: input.title.trim(),
-        body: input.body.trim(),
-        authorName: "You",
-        createdAt: new Date().toISOString(),
-        topic: input.topic,
-        score: 1,
-        commentCount: 0,
-        viewerVote: 1,
-        project: SEED_PROJECTS.find((project) => project.id === input.projectId) ?? null,
-      }
-      posts.unshift(post)
-      return { ...post }
+      await requireViewer()
+      const created = parsePost(
+        await rpc("create_community_post", {
+          p_title: input.title.trim(),
+          p_body: input.body.trim(),
+          p_topic: input.topic,
+          p_project_id: input.projectId,
+        }),
+      )
+      if (!created) throw new Error("Your post was saved but could not be displayed.")
+      return created
     },
 
     async createComment(input) {
-      const comment: CommunityComment = {
-        id: `local-comment-${crypto.randomUUID()}`,
-        postId: input.postId,
-        parentId: input.parentId,
-        authorName: "You",
-        body: input.body.trim(),
-        createdAt: new Date().toISOString(),
-        score: 1,
-        viewerVote: 1,
-      }
-      comments.push(comment)
-      recount(input.postId)
-      return { ...comment }
+      await requireViewer()
+      const created = parseComment(
+        await rpc("create_community_comment", {
+          p_post_id: input.postId,
+          p_body: input.body.trim(),
+          p_parent_id: input.parentId,
+        }),
+      )
+      if (!created) throw new Error("Your comment was saved but could not be displayed.")
+      return created
     },
 
     async votePost(postId, direction) {
-      const post = findPost(postId)
-      if (!post) throw new Error("This discussion is no longer available.")
-      const next = applyVote(post, direction)
-      post.score = next.score
-      post.viewerVote = next.viewerVote
-      return next
+      await requireViewer()
+      return parseVote(
+        await rpc("vote_community_post", { p_post_id: postId, p_direction: direction }),
+      )
     },
 
     async voteComment(commentId, direction) {
-      const comment = comments.find((item) => item.id === commentId)
-      if (!comment) throw new Error("This comment is no longer available.")
-      const next = applyVote(comment, direction)
-      comment.score = next.score
-      comment.viewerVote = next.viewerVote
-      return next
+      await requireViewer()
+      return parseVote(
+        await rpc("vote_community_comment", {
+          p_comment_id: commentId,
+          p_direction: direction,
+        }),
+      )
     },
 
     async searchProjects(term) {
-      const query = term.trim().toLowerCase()
-      const matches = query
-        ? SEED_PROJECTS.filter((project) => project.name.toLowerCase().includes(query))
-        : SEED_PROJECTS
-      return matches.map((project) => ({ ...project }))
+      const trimmed = term.trim()
+      return parseProjects(
+        await rpc("community_project_options", { p_search: trimmed || null }),
+      )
+    },
+
+    async getViewer() {
+      const { data } = await client.auth.getUser()
+      const user = data.user
+      if (!user) return null
+      const { data: profile } = await client
+        .from("profiles")
+        .select("display_name")
+        .eq("id", user.id)
+        .maybeSingle()
+      return {
+        id: user.id,
+        name: asString(profile?.display_name) || user.email?.split("@")[0] || "You",
+      }
     },
   }
 }
@@ -442,10 +308,20 @@ let source: CommunitySource | null = null
 /**
  * Returns the process-wide community source, creating it on first use.
  *
- * Hooks accept a `CommunitySource` parameter that defaults to this, which is
- * the seam a Supabase-backed implementation plugs into.
+ * Throws `CommunityConfigurationError` when the Supabase environment is not
+ * configured, which the UI surfaces as a setup message rather than a crash.
  */
 export function getCommunitySource(): CommunitySource {
-  if (!source) source = createSeededSource()
+  if (source) return source
+
+  const url = import.meta.env.VITE_SUPABASE_URL
+  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+  if (!url || !key) {
+    throw new CommunityConfigurationError(
+      "Community discussion requires VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.",
+    )
+  }
+
+  source = createSupabaseSource(createClient(url, key))
   return source
 }

@@ -1,6 +1,7 @@
 import * as React from "react"
 import { IconInfoCircle } from "@tabler/icons-react"
 
+import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
@@ -8,21 +9,24 @@ import { CommunitySidebar } from "./community-sidebar"
 import type { SortOption, TopicId } from "./community-contract"
 
 /**
- * Notice that the discussion shown is seeded sample content.
+ * Prompt shown to residents browsing without an account.
  *
- * Shown while the community source is not backed by resident activity, so the
- * prototype never presents sample data as live.
+ * Discussion is readable anonymously, so this explains why the write controls
+ * will not work rather than hiding the content behind a wall.
  */
-function SampleContentNotice() {
+function SignInNotice() {
   return (
-    <p className="flex items-start gap-2 rounded-lg border border-warning/35 bg-warning/10 px-3.5 py-2.5 text-xs leading-5 text-warning">
-      <IconInfoCircle className="mt-px size-4 shrink-0" aria-hidden="true" />
-      <span>
-        <span className="font-semibold">Sample discussion.</span> Community posts and comments below
-        are seeded examples for this prototype, not live resident activity. Votes and replies you
-        add are kept for this session only.
-      </span>
-    </p>
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/60 px-3.5 py-2.5">
+      <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
+        <IconInfoCircle className="mt-px size-4 shrink-0" aria-hidden="true" />
+        <span>
+          You are browsing as a guest. Sign in to post, comment, and vote.
+        </span>
+      </p>
+      <Button size="sm" variant="outline" asChild>
+        <a href="/login">Sign in</a>
+      </Button>
+    </div>
   )
 }
 
@@ -41,7 +45,7 @@ export function CommunityShell({
   onSortChange,
   topic,
   onTopicChange,
-  isSampleContent,
+  showSignInNotice = false,
   children,
 }: {
   headerTitle: string
@@ -50,7 +54,7 @@ export function CommunityShell({
   onSortChange: (sort: SortOption) => void
   topic: TopicId | null
   onTopicChange: (topic: TopicId | null) => void
-  isSampleContent: boolean
+  showSignInNotice?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -96,9 +100,9 @@ export function CommunityShell({
             </header>
 
             <div className="mx-auto w-full max-w-[84rem] min-w-0 px-3 py-4 sm:px-5 sm:py-5">
-              {isSampleContent && (
+              {showSignInNotice && (
                 <div className="mb-3">
-                  <SampleContentNotice />
+                  <SignInNotice />
                 </div>
               )}
               {children}

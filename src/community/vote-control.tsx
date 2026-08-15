@@ -16,6 +16,7 @@ export function VoteControl({
   label,
   orientation = "vertical",
   size = "default",
+  canInteract = true,
 }: {
   score: number
   vote: VoteState
@@ -24,6 +25,8 @@ export function VoteControl({
   label: string
   orientation?: "vertical" | "horizontal"
   size?: "default" | "sm"
+  /** False for guests: the controls explain themselves instead of failing. */
+  canInteract?: boolean
 }) {
   const vertical = orientation === "vertical"
   const iconSize = size === "sm" ? "size-4" : "size-[1.15rem]"
@@ -44,7 +47,8 @@ export function VoteControl({
       <button
         type="button"
         aria-pressed={vote === 1}
-        aria-label={`Upvote: ${label}`}
+        aria-label={canInteract ? `Upvote: ${label}` : `Sign in to upvote: ${label}`}
+        title={canInteract ? undefined : "Sign in to vote"}
         onClick={() => onVote(1)}
         className={cn(buttonBase, vote === 1 && "text-primary hover:text-primary")}
       >
@@ -69,7 +73,8 @@ export function VoteControl({
       <button
         type="button"
         aria-pressed={vote === -1}
-        aria-label={`Downvote: ${label}`}
+        aria-label={canInteract ? `Downvote: ${label}` : `Sign in to downvote: ${label}`}
+        title={canInteract ? undefined : "Sign in to vote"}
         onClick={() => onVote(-1)}
         className={cn(buttonBase, vote === -1 && "text-destructive hover:text-destructive")}
       >

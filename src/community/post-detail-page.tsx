@@ -105,7 +105,9 @@ export function PostDetailPage({ postId }: { postId: string }) {
       onSortChange={onSortChange}
       topic={null}
       onTopicChange={onTopicChange}
-      isSampleContent={thread.isSampleContent}
+      showSignInNotice={
+        thread.viewerReady && !thread.canInteract && thread.state !== "unconfigured"
+      }
     >
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_19rem] xl:gap-5">
         <main className="min-w-0 space-y-3">
@@ -117,14 +119,21 @@ export function PostDetailPage({ postId }: { postId: string }) {
           </Button>
 
           {thread.error && (
-            <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <p
+              role="alert"
+              className={
+                thread.state === "unconfigured"
+                  ? "rounded-lg border border-warning/35 bg-warning/10 px-4 py-3 text-sm text-warning"
+                  : "rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              }
+            >
               {thread.error}
             </p>
           )}
 
           {thread.state === "loading" ? (
             <DetailSkeleton />
-          ) : !post ? (
+          ) : thread.state === "unconfigured" ? null : !post ? (
             <NotFound />
           ) : (
             <>
@@ -136,6 +145,7 @@ export function PostDetailPage({ postId }: { postId: string }) {
                       vote={post.viewerVote}
                       onVote={thread.votePost}
                       label={post.title}
+                      canInteract={thread.canInteract}
                     />
                   </div>
 
@@ -193,6 +203,7 @@ export function PostDetailPage({ postId }: { postId: string }) {
                 onVote={thread.voteComment}
                 onReply={thread.addComment}
                 composerId={COMPOSER_ID}
+                canInteract={thread.canInteract}
               />
             </>
           )}

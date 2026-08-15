@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { AlertCircle, Plus, Search, X } from "lucide-react"
+import { IconMessages } from "@tabler/icons-react"
+import { AlertCircle, Plus, RefreshCw, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -14,7 +15,13 @@ import {
 } from "./community-contract"
 import { PostCard } from "./post-card"
 
-function CommunityHeader({ onCreatePost }: { onCreatePost: () => void }) {
+function CommunityHeader({
+  onCreatePost,
+  canInteract,
+}: {
+  onCreatePost: () => void
+  canInteract: boolean
+}) {
   return (
     <header className="rounded-lg border border-border bg-card px-4 py-4 sm:px-5 sm:py-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -29,10 +36,19 @@ function CommunityHeader({ onCreatePost }: { onCreatePost: () => void }) {
             Discuss public infrastructure, share observations, and learn from other residents.
           </p>
         </div>
-        <Button size="lg" onClick={onCreatePost} className="shrink-0">
-          <Plus aria-hidden="true" />
-          Create Post
-        </Button>
+        {canInteract ? (
+          <Button size="lg" onClick={onCreatePost} className="shrink-0">
+            <Plus aria-hidden="true" />
+            Create Post
+          </Button>
+        ) : (
+          <Button size="lg" className="shrink-0" asChild>
+            <a href="/login">
+              <Plus aria-hidden="true" />
+              Sign in to post
+            </a>
+          </Button>
+        )}
       </div>
     </header>
   )
@@ -182,6 +198,56 @@ function PostSkeleton() {
 /**
  * Centre column: community header, feed controls, and the discussion list.
  */
+/** Distinguishes "nothing here yet" from "nothing matches your filters". */
+function EmptyState({
+  filtered,
+  canInteract,
+  onCreatePost,
+  onClearFilters,
+}: {
+  filtered: boolean
+  canInteract: boolean
+  onCreatePost: () => void
+  onClearFilters: () => void
+}) {
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center">
+      {filtered ? (
+        <>
+          <Search className="mx-auto size-6 text-muted-foreground" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">No discussions match this view</p>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
+            Try a different search term or topic.
+          </p>
+          <Button variant="outline" size="lg" className="mt-4" onClick={onClearFilters}>
+            Clear filters
+          </Button>
+        </>
+      ) : (
+        <>
+          <IconMessages className="mx-auto size-6 text-muted-foreground" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">No discussions yet</p>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
+            {canInteract
+              ? "Be the first to start a discussion about public infrastructure in your area."
+              : "Sign in to start the first discussion about public infrastructure in your area."}
+          </p>
+          {canInteract ? (
+            <Button variant="outline" size="lg" className="mt-4" onClick={onCreatePost}>
+              <Plus aria-hidden="true" />
+              Create Post
+            </Button>
+          ) : (
+            <Button variant="outline" size="lg" className="mt-4" asChild>
+              <a href="/login">Sign in</a>
+            </Button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 export function CommunityFeed({
   posts,
   state,
@@ -194,9 +260,11 @@ export function CommunityFeed({
   onTopicChange,
   onVote,
   onCreatePost,
+  onRetry,
+  canInteract,
 }: {
   posts: CommunityPost[]
-  state: "loading" | "ready" | "error"
+  state: "loading" | "ready" | "error" | "unconfigured"
   error: string | null
   sort: SortOption
   onSortChange: (sort: SortOption) => void
@@ -206,55 +274,86 @@ export function CommunityFeed({
   onTopicChange: (topic: TopicId | null) => void
   onVote: (postId: string, direction: 1 | -1) => void
   onCreatePost: () => void
+  onRetry: () => void
+  canInteract: boolean
 }) {
+  const filtered = search.trim().length > 0 || topic !== null
+
+  const clearFilters = () => {
+    onSearchChange("")
+    onTopicChange(null)
+  }
+
   return (
     <div className="space-y-3">
-      <CommunityHeader onCreatePost={onCreatePost} />
+      <CommunityHeader onCreatePost={onCreatePost} canInteract={canInteract} />
 
-      <FeedControls
-        sort={sort}
-        onSortChange={onSortChange}
-        search={search}
-        onSearchChange={onSearchChange}
-        topic={topic}
-        onTopicChange={onTopicChange}
-      />
-
-      {error && (
-        <p
+      {state === "unconfigured" ? (
+        <div
           role="alert"
-          className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          className="rounded-lg border border-warning/35 bg-warning/10 px-4 py-3.5 text-sm text-warning"
         >
-          <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
-          {error}
-        </p>
-      )}
+          <p className="font-medium">Community discussion is not available yet</p>
+          <p className="mt-1 text-xs leading-5">
+            {error ?? "Community discussion is not configured for this environment."}
+          </p>
+        </div>
+      ) : (
+        <>
+          <FeedControls
+            sort={sort}
+            onSortChange={onSortChange}
+            search={search}
+            onSearchChange={onSearchChange}
+            topic={topic}
+            onTopicChange={onTopicChange}
+          />
 
-      <div className="space-y-2.5" aria-live="polite" aria-busy={state === "loading"}>
-        {state === "loading" && posts.length === 0 ? (
-          <>
-            <PostSkeleton />
-            <PostSkeleton />
-            <PostSkeleton />
-          </>
-        ) : posts.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center">
-            <Search className="mx-auto size-6 text-muted-foreground" aria-hidden="true" />
-            <p className="mt-3 text-sm font-medium">No discussions match this view</p>
-            <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
-              Try a different search term or topic, or start the discussion yourself.
-            </p>
-            <Button variant="outline" size="lg" className="mt-4" onClick={onCreatePost}>
-              <Plus aria-hidden="true" />
-              Create Post
-            </Button>
+          {error && (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            >
+              <p className="flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
+                {error}
+              </p>
+              {state === "error" && (
+                <Button variant="outline" size="sm" onClick={onRetry}>
+                  <RefreshCw aria-hidden="true" />
+                  Retry
+                </Button>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2.5" aria-live="polite" aria-busy={state === "loading"}>
+            {state === "loading" && posts.length === 0 ? (
+              <>
+                <PostSkeleton />
+                <PostSkeleton />
+                <PostSkeleton />
+              </>
+            ) : state === "error" && posts.length === 0 ? null : posts.length === 0 ? (
+              <EmptyState
+                filtered={filtered}
+                canInteract={canInteract}
+                onCreatePost={onCreatePost}
+                onClearFilters={clearFilters}
+              />
+            ) : (
+              posts.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onVote={(direction) => onVote(post.id, direction)}
+                  canInteract={canInteract}
+                />
+              ))
+            )}
           </div>
-        ) : (
-          posts.map((post) => (
-            <PostCard key={post.id} post={post} onVote={(direction) => onVote(post.id, direction)} />
-          ))
-        )}
-      </div>
+        </>
+      )}
     </div>
   )
 }
