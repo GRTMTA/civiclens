@@ -78,6 +78,12 @@ describe("official project map contract", () => {
     })
   })
 
+  it("ignores incomplete and unsupported world-scale camera state", () => {
+    expect(readMapUrlState("").camera).toBeNull()
+    expect(readMapUrlState("?project=dpwh-1").camera).toBeNull()
+    expect(readMapUrlState("?lat=0&lng=0&zoom=0").camera).toBeNull()
+  })
+
   it("writes camera state without changing project selection", () => {
     expect(
       writeCameraSearch("?project=dpwh-1", {

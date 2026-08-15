@@ -54,6 +54,8 @@ import {
   type ViewportResponse,
 } from "./map-contract"
 
+const PROJECT_LIST_PAGE_SIZE = 50
+
 const DEFAULT_CAMERA: CameraState = {
   latitude: 10.3157,
   longitude: 123.8854,
@@ -189,6 +191,14 @@ function ProjectList({
   queryError: string | null
   configurationRequired: boolean
 }) {
+  const [visibleCount, setVisibleCount] = useState(PROJECT_LIST_PAGE_SIZE)
+  const visibleFeatures = features.slice(0, visibleCount)
+  const hasMore = visibleFeatures.length < features.length
+
+  useEffect(() => {
+    setVisibleCount(PROJECT_LIST_PAGE_SIZE)
+  }, [features])
+
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card">
       <div className="flex items-start justify-between gap-3 border-b p-4">
@@ -253,7 +263,7 @@ function ProjectList({
           </div>
         )}
         <ul className="space-y-1" aria-label="Official projects">
-          {features.map((feature) => (
+          {visibleFeatures.map((feature) => (
             <li key={feature.id}>
               <button
                 type="button"
@@ -277,9 +287,21 @@ function ProjectList({
             </li>
           ))}
         </ul>
+        {hasMore && (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 w-full"
+            onClick={() => setVisibleCount((count) => count + PROJECT_LIST_PAGE_SIZE)}
+          >
+            Show {Math.min(PROJECT_LIST_PAGE_SIZE, features.length - visibleFeatures.length)} more
+          </Button>
+        )}
       </div>
       <div className="border-t p-3 text-xs text-muted-foreground">
-        {loading && features.length > 0 ? "Updating this area…" : `${features.length} returned`}
+        {loading && features.length > 0
+          ? "Updating this area…"
+          : `Showing ${visibleFeatures.length} of ${features.length} returned`}
       </div>
     </div>
   )
@@ -568,6 +590,7 @@ function OfficialProjectMap({
     <MapLibre
       ref={mapRef}
       initialViewState={camera}
+      minZoom={7}
       mapStyle={styleUrl}
       interactiveLayerIds={["project-clusters", "projects-unclustered"]}
       onClick={handleClick}

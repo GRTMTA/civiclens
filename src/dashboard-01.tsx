@@ -9,6 +9,7 @@ export function Dashboard01Page() {
   return (
     <TooltipProvider>
       <SidebarProvider
+        className="lg:h-svh lg:overflow-hidden"
         style={
           {
             "--sidebar-width": "calc(var(--spacing) * 72)",

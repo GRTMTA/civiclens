@@ -189,7 +189,9 @@ export function parseProjectDetail(value: unknown): ProjectDetail | null {
 }
 
 function readNumber(params: URLSearchParams, key: string): number | null {
-  const value = Number(params.get(key))
+  const rawValue = params.get(key)
+  if (rawValue === null || rawValue.trim() === "") return null
+  const value = Number(rawValue)
   return Number.isFinite(value) ? value : null
 }
 
@@ -205,7 +207,7 @@ function readCamera(params: URLSearchParams): CameraState | null {
     latitude > 90 ||
     longitude < -180 ||
     longitude > 180 ||
-    zoom < 0 ||
+    zoom < 7 ||
     zoom > 24
   ) {
     return null
