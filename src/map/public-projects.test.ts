@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest"
 import {
   fetchProjectDetail,
   fetchViewportProjects,
+  getMapStyle,
   isMapConfigurationError,
   MapConfigurationError,
+  SATELLITE_ATTRIBUTION,
+  SATELLITE_STYLE,
 } from "./public-projects"
 
 describe("public project data seam", () => {
@@ -13,6 +16,23 @@ describe("public project data seam", () => {
     })
 
     expect(result).toBeNull()
+  })
+
+  it("uses the no-key attributed satellite style unless an override is set", () => {
+    expect(getMapStyle("")).toBe(SATELLITE_STYLE)
+    expect(getMapStyle("   ")).toBe(SATELLITE_STYLE)
+    expect(getMapStyle("https://maps.example/style.json")).toBe(
+      "https://maps.example/style.json",
+    )
+
+    const satelliteSource = SATELLITE_STYLE.sources.satellite
+    expect(satelliteSource).toMatchObject({
+      type: "raster",
+      maxzoom: 14,
+      attribution: SATELLITE_ATTRIBUTION,
+    })
+    expect(SATELLITE_ATTRIBUTION).toContain("Sentinel-2 cloudless")
+    expect(SATELLITE_ATTRIBUTION).toContain("EOX IT Services GmbH")
   })
 
   it("passes only bounded viewport arguments to the public query", async () => {
@@ -81,6 +101,9 @@ describe("public project data seam", () => {
           infrastructure_year: "2025",
           program_name: "Bridge program",
           source_of_funds: "National government",
+          geometry_kind: "official",
+          geometry_source: "DPWH approved plan",
+          geometry_source_url: "https://example.gov.ph/plan",
         },
         error: null,
       }),
@@ -92,6 +115,9 @@ describe("public project data seam", () => {
         infrastructureYear: "2025",
         programName: "Bridge program",
         sourceOfFunds: "National government",
+        geometryKind: "official",
+        geometrySource: "DPWH approved plan",
+        geometrySourceUrl: "https://example.gov.ph/plan",
       }),
     )
   })

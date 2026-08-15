@@ -10,7 +10,7 @@ CivicLens is a Cebu City transparency PWA using Supabase Auth, Postgres/PostGIS,
 4. Add server secrets with `supabase secrets set GROQ_API_KEY=... GROQ_MODEL=qwen/qwen3.6-27b`
 5. Run the web app with `npm run dev`
 
-Without `GROQ_API_KEY`, scans use a safe demo analysis. Project records are loaded separately through the pinned DPWH importer described below.
+Without `GROQ_API_KEY`, scans use a safe demo analysis. Project records are loaded separately through the pinned DPWH importer described below. `VITE_MAP_STYLE_URL` is optional; when omitted, the map uses the attributed no-key satellite fallback described under **Satellite map and project geometry**.
 
 ## Architecture
 
@@ -29,18 +29,15 @@ Report photos are private and stored under the authenticated user's folder. Groq
 
 ## Community context layer
 
-Community is a context layer around Official-source project records, not a standalone discussion board. The distinction is enforced in both the schema and the UI:
+Community is a context layer around official-source project records, not a standalone discussion board. The distinction is enforced in both the schema and the UI:
 
 | Concept | Source | Where it lives |
 | --- | --- | --- |
 | Official-source record | Government data (DPWH snapshot) | `public.projects`, the map |
-| Community discussion | Resident content | `community_posts` with `kind = 'discussion'` |
-| Resident observation | A resident's dated account of something seen | `community_posts` with `kind = 'observation'` |
+| Community discussion | Resident content | `community_posts` |
 | Supporting photos | Resident-supplied | `community_post_media`, `community_comment_media` |
 
-Resident content may *reference* a project, but it never verifies, amends, or invalidates the official record. `community_pulse` aggregates are labelled as discussion activity, never as project condition. Observations carry an optional approximate `area_label` (e.g. a barangay) and store no coordinates, so an exact capture point is never published.
-
-Navigation runs both ways: a post's project chip opens `/map?project=<id>`, and a project's community section opens `/community?project=<id>`.
+Resident content may *reference* a project, but it never verifies, amends, or invalidates the official record. Community activity is always labeled separately from official project information. A post's project chip opens `/map?project=<id>`; explicitly linked posts also appear in the selected project's **Community posts** map-dialog tab.
 
 Community media buckets (`avatars`, `community-post-media`, `community-comment-media`) are public so guests can see photos in the discussion they browse; writes are owner-only through storage policies. The `report-photos` bucket stays private.
 
@@ -58,6 +55,32 @@ node --experimental-strip-types scripts/verify-community-auth.ts  # posting, med
 ```
 
 Both scripts need a running local stack and exit non-zero on failure. They are excluded from `npm test`, which stays offline.
+
+## Satellite map and project geometry
+
+The project map uses MapLibre. At zoom levels below 15 it shows clustered project locations; at zoom 15 and above it switches to clickable project lines and areas. Overlapping areas open a compact centered chooser. A selected project opens a centered, viewport-constrained dialog with **Project details** and **Community posts** tabs instead of a frame-bound panel or near-full-screen sheet.
+
+The Community tab reads only discussions whose `community_posts.project_id` explicitly matches the selected project. Posts are ranked by score and then recency, rendered with the existing overview cards, and link to `/community/post/:postId` for voting, comments, and sharing. Resident discussion is always labeled separately from official project information. Apply `20260816020000_project_community_posts.sql` to enable this scoped feed.
+
+Map style selection uses this order:
+
+1. `VITE_MAP_STYLE_URL`, when supplied, is the complete approved MapLibre style override.
+2. `VITE_MAPTILER_KEY` selects MapTiler Satellite Hybrid for higher-resolution imagery with road labels. Create a free non-commercial account at [MapTiler Cloud](https://cloud.maptiler.com/), restrict the browser key to the development and deployed domains, and monitor the account quota. The key is public by design and must never have unrelated account privileges.
+3. With neither value, CivicLens falls back to the no-key EOX Sentinel-2 Cloudless 2020 raster mosaic and displays its required attribution.
+
+The EOX imagery is approximately 10 m native resolution and is overzoomed above its native zoom, so it provides aerial context but not building-level detail. Its annual mosaic is licensed under Creative Commons Attribution-NonCommercial-ShareAlike; confirm that the deployment qualifies and review the current [EOX terms and attribution](https://www.s2maps.eu/?downloadservice) before release. MapTiler availability, imagery resolution, commercial eligibility, quota, logo, and attribution remain governed by the selected MapTiler plan.
+
+Every imported DPWH record has an authoritative recorded point. The map does not present that point as an exact boundary:
+
+- `official_geometry` may contain only a reviewed LineString, MultiLineString, Polygon, or MultiPolygon supplied by an official source. `geometry_source` is required and `geometry_source_url` should be supplied when available.
+- A signed-in moderator may request nearby road candidates from the configured Overpass endpoint. The browser sends only the selected DPWH coordinate, clips each OSM way to approximately 300 m, and requires a review note before the moderator can save it. The database independently enforces moderator access, a maximum 150 m distance from the DPWH point, a maximum 750 m line length, and an audit record.
+- Saved OSM routes display as **Reviewed OSM estimate** with OpenStreetMap attribution and an ODbL source link. They are never promoted to official geometry and may be replaced by an official source later.
+- Records with neither official nor reviewed geometry display a dashed, translucent 50 m buffer labeled **Estimated project area**. It is a selection aid, not an official project footprint.
+- Do not populate `official_geometry` from guessed routes, geocoding, OpenStreetMap matching, or a generic buffer. Apply `20260816000000_project_display_geometry.sql` and `20260816010000_osm_reviewed_estimate_geometry.sql` in order.
+
+The public Overpass service is a best-effort community resource, not an unlimited production API. Candidate lookup is deliberately manual and on demand; do not bulk-query it. Set `VITE_OVERPASS_URL` to another policy-compatible mirror if needed, and retain `© OpenStreetMap contributors` attribution and ODbL compliance.
+
+Mandatory release QA: verify satellite attribution is visible; markers change to areas at zoom 15; official, reviewed-estimate, and point-estimate styles are distinguishable; and all non-official details contain disclaimers. Verify overlapping areas open a centered, unclipped chooser no wider than 48rem and no taller than 70dvh. On desktop and mobile, verify the selected project opens one centered dialog; at desktop it uses the wider landscape layout (up to 72rem wide and 76dvh tall). Both tabs must support keyboard navigation, occupy equal full-width halves of the dialog, and keep long content independently scrollable. In **Community posts**, verify loading, error/retry, and “No community posts for this project yet.” states; verify every overview is explicitly linked to the selected project and ordered by score, then newest; and verify selecting an overview opens `/community/post/:postId` in the same tab with voting, comments, and sharing available. Finally, verify only moderators see review controls, keyboard and touch map selection work, and provider failures leave the project list usable.
 
 ## DPWH dataset import
 

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
+  areaSelectionKind,
   normalizeOfficialStatus,
   parseProjectDetail,
   parseViewportPayload,
   readMapUrlState,
+  uniqueProjectIds,
   writeCameraSearch,
   writeProjectSearch,
 } from "./map-contract"
@@ -65,6 +67,81 @@ describe("official project map contract", () => {
         longitude: 123.9,
       }),
     ).toEqual(expect.objectContaining({ id: "dpwh-1", name: "A project" }))
+  })
+
+  it("parses estimated polygons and official lines with recorded coordinates", () => {
+    const result = parseViewportPayload({
+      type: "FeatureCollection",
+      truncated: false,
+      features: [
+        {
+          type: "Feature",
+          id: "dpwh-estimated",
+          geometry: {
+            type: "Polygon",
+            coordinates: [[[123.89, 10.29], [123.91, 10.29], [123.91, 10.31], [123.89, 10.29]]],
+          },
+          properties: {
+            id: "dpwh-estimated",
+            name: "Estimated project",
+            recorded_coordinates: [123.9, 10.3],
+            geometry_kind: "estimated",
+          },
+        },
+        {
+          type: "Feature",
+          id: "dpwh-official",
+          geometry: {
+            type: "LineString",
+            coordinates: [[123.9, 10.3], [123.91, 10.31]],
+          },
+          properties: {
+            id: "dpwh-official",
+            name: "Official road project",
+            recorded_coordinates: [123.905, 10.305],
+            geometry_kind: "official",
+            geometry_source: "DPWH official plan",
+            geometry_source_url: "https://example.gov.ph/geometry",
+          },
+        },
+      ],
+    })
+
+    expect(result.features[0]).toMatchObject({
+      geometryKind: "estimated",
+      coordinates: [123.9, 10.3],
+      displayGeometry: { type: "Polygon" },
+    })
+    expect(result.features[1]).toMatchObject({
+      geometryKind: "official",
+      geometrySource: "DPWH official plan",
+      geometrySourceUrl: "https://example.gov.ph/geometry",
+      displayGeometry: { type: "LineString" },
+    })
+  })
+
+  it("drops malformed display geometry instead of rendering misleading areas", () => {
+    const result = parseViewportPayload({
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        id: "broken",
+        geometry: { type: "Polygon", coordinates: [[[123.9, 10.3]]] },
+        properties: { id: "broken", recorded_coordinates: [123.9, 10.3] },
+      }],
+    })
+
+    expect(result.features).toEqual([])
+  })
+
+  it("deduplicates overlapping layer hits and chooses only when needed", () => {
+    expect(uniqueProjectIds(["dpwh-1", "dpwh-1", "", "dpwh-2"])).toEqual([
+      "dpwh-1",
+      "dpwh-2",
+    ])
+    expect(areaSelectionKind([])).toBe("none")
+    expect(areaSelectionKind(["dpwh-1", "dpwh-1"])).toBe("direct")
+    expect(areaSelectionKind(["dpwh-1", "dpwh-2"])).toBe("choose")
   })
 
   it("reads project selection and valid camera state from the URL", () => {

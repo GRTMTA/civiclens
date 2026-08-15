@@ -1,4 +1,14 @@
 export type DisplayStatus = "ongoing" | "completed" | "planned" | "unknown"
+export type GeometryKind = "official" | "estimated"
+
+type Position = [number, number]
+
+export type ProjectDisplayGeometry =
+  | { type: "Point"; coordinates: Position }
+  | { type: "LineString"; coordinates: Position[] }
+  | { type: "MultiLineString"; coordinates: Position[][] }
+  | { type: "Polygon"; coordinates: Position[][] }
+  | { type: "MultiPolygon"; coordinates: Position[][][] }
 
 export type CameraState = {
   latitude: number
@@ -21,6 +31,10 @@ export type ViewportFeature = {
   rawStatus: string
   displayStatus: DisplayStatus
   coordinates: [number, number]
+  displayGeometry: ProjectDisplayGeometry
+  geometryKind: GeometryKind
+  geometrySource?: string
+  geometrySourceUrl?: string
 }
 
 export type ViewportResponse = {
@@ -52,6 +66,9 @@ export type ProjectDetail = {
   infrastructureYear?: string
   programName?: string
   sourceOfFunds?: string
+  geometryKind: GeometryKind
+  geometrySource?: string
+  geometrySourceUrl?: string
 }
 
 type RecordValue = Record<string, unknown>
@@ -81,6 +98,71 @@ function asCoordinates(value: unknown): [number, number] | null {
   return Number.isFinite(longitude) && Number.isFinite(latitude)
     ? [longitude, latitude]
     : null
+}
+
+function asPositionArray(value: unknown): Position[] | null {
+  if (!Array.isArray(value)) return null
+  const positions = value.map(asCoordinates)
+  return positions.every((position): position is Position => position !== null)
+    ? positions
+    : null
+}
+
+function asProjectDisplayGeometry(value: unknown): ProjectDisplayGeometry | null {
+  const geometry = asRecord(value)
+  if (!geometry) return null
+
+  if (geometry.type === "Point") {
+    const coordinates = asCoordinates(geometry.coordinates)
+    return coordinates ? { type: "Point", coordinates } : null
+  }
+  if (geometry.type === "LineString") {
+    const coordinates = asPositionArray(geometry.coordinates)
+    return coordinates && coordinates.length >= 2
+      ? { type: "LineString", coordinates }
+      : null
+  }
+  if (geometry.type === "MultiLineString" && Array.isArray(geometry.coordinates)) {
+    const coordinates = geometry.coordinates.map(asPositionArray)
+    return coordinates.length > 0 && coordinates.every(
+      (line): line is Position[] => line !== null && line.length >= 2,
+    )
+      ? { type: "MultiLineString", coordinates }
+      : null
+  }
+  if (geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+    const coordinates = geometry.coordinates.map(asPositionArray)
+    return coordinates.length > 0 && coordinates.every(
+      (ring): ring is Position[] => ring !== null && ring.length >= 4,
+    )
+      ? { type: "Polygon", coordinates }
+      : null
+  }
+  if (geometry.type === "MultiPolygon" && Array.isArray(geometry.coordinates)) {
+    const coordinates = geometry.coordinates.map((rawPolygon) =>
+      Array.isArray(rawPolygon) ? rawPolygon.map(asPositionArray) : null,
+    )
+    return coordinates.length > 0 && coordinates.every(
+      (polygon): polygon is Position[][] =>
+        polygon !== null &&
+        polygon.length > 0 &&
+        polygon.every((ring) => ring !== null && ring.length >= 4),
+    )
+      ? { type: "MultiPolygon", coordinates }
+      : null
+  }
+  return null
+}
+
+export function uniqueProjectIds(ids: readonly string[]): string[] {
+  return [...new Set(ids.filter((id) => id.trim().length > 0))]
+}
+
+export function areaSelectionKind(
+  ids: readonly string[],
+): "none" | "direct" | "choose" {
+  const count = uniqueProjectIds(ids).length
+  return count === 0 ? "none" : count === 1 ? "direct" : "choose"
 }
 
 export function normalizeOfficialStatus(value: string | null | undefined): DisplayStatus {
@@ -128,9 +210,13 @@ export function parseViewportPayload(value: unknown): ViewportResponse {
   const features = rawFeatures.flatMap((rawFeature): ViewportFeature[] => {
     const feature = asRecord(rawFeature)
     const properties = asRecord(feature?.properties)
-    const coordinates = asCoordinates(asRecord(feature?.geometry)?.coordinates)
+    const displayGeometry = asProjectDisplayGeometry(feature?.geometry)
+    const recordedCoordinates = asCoordinates(properties?.recorded_coordinates)
+    const coordinates =
+      recordedCoordinates ??
+      (displayGeometry?.type === "Point" ? displayGeometry.coordinates : null)
     const id = asString(properties?.id ?? feature?.id)
-    if (!properties || !coordinates || !id) return []
+    if (!properties || !displayGeometry || !coordinates || !id) return []
 
     return [
       {
@@ -141,6 +227,10 @@ export function parseViewportPayload(value: unknown): ViewportResponse {
         rawStatus: asString(properties.status, "Unknown"),
         displayStatus: normalizeOfficialStatus(asString(properties.status)),
         coordinates,
+        displayGeometry,
+        geometryKind: properties.geometry_kind === "official" ? "official" : "estimated",
+        geometrySource: asOptionalString(properties.geometry_source),
+        geometrySourceUrl: asOptionalString(properties.geometry_source_url),
       },
     ]
   })
@@ -185,6 +275,9 @@ export function parseProjectDetail(value: unknown): ProjectDetail | null {
     infrastructureYear: asOptionalString(project.infrastructure_year),
     programName: asOptionalString(project.program_name),
     sourceOfFunds: asOptionalString(project.source_of_funds),
+    geometryKind: project.geometry_kind === "official" ? "official" : "estimated",
+    geometrySource: asOptionalString(project.geometry_source),
+    geometrySourceUrl: asOptionalString(project.geometry_source_url),
   }
 }
 

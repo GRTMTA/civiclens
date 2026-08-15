@@ -38,18 +38,19 @@ import {
   createPublicRpcClient,
   fetchProjectDetail,
   fetchViewportProjects,
-  getMapStyleUrl,
+  getMapStyle,
   isMapConfigurationError,
   type PublicRpcClient,
 } from "./public-projects"
 import {
-  normalizeOfficialStatus,
-  parseProjectDetail,
+  areaSelectionKind,
   readMapUrlState,
+  uniqueProjectIds,
   writeCameraSearch,
   writeProjectSearch,
   type CameraState,
   type DisplayStatus,
+  type GeometryKind,
   type ProjectDetail,
   type ViewportBounds,
   type ViewportFeature,
@@ -123,7 +124,20 @@ function boundsFromMap(target: MapLayerMouseEvent["target"]): ViewportBounds {
   }
 }
 
-function toGeoJson(response: ViewportResponse) {
+function featureProperties(feature: ViewportFeature) {
+  return {
+    id: feature.id,
+    name: feature.name,
+    category: feature.category,
+    source: feature.source,
+    status: feature.rawStatus,
+    displayStatus: feature.displayStatus,
+    geometryKind: feature.geometryKind,
+    geometrySource: feature.geometrySource ?? "",
+  }
+}
+
+function toPointGeoJson(response: ViewportResponse) {
   return {
     type: "FeatureCollection" as const,
     features: response.features.map((feature) => ({
@@ -133,14 +147,19 @@ function toGeoJson(response: ViewportResponse) {
         type: "Point" as const,
         coordinates: feature.coordinates,
       },
-      properties: {
-        id: feature.id,
-        name: feature.name,
-        category: feature.category,
-        source: feature.source,
-        status: feature.rawStatus,
-        displayStatus: feature.displayStatus,
-      },
+      properties: featureProperties(feature),
+    })),
+  }
+}
+
+function toDisplayGeoJson(response: ViewportResponse) {
+  return {
+    type: "FeatureCollection" as const,
+    features: response.features.map((feature) => ({
+      type: "Feature" as const,
+      id: feature.id,
+      geometry: feature.displayGeometry,
+      properties: featureProperties(feature),
     })),
   }
 }
@@ -149,6 +168,21 @@ function StatusBadge({ status }: { status: DisplayStatus }) {
   return (
     <Badge variant="outline" className={STATUS_CLASSES[status]}>
       {statusLabel(status)}
+    </Badge>
+  )
+}
+
+function GeometryBadge({ kind }: { kind: GeometryKind }) {
+  return (
+    <Badge
+      variant="outline"
+      className={
+        kind === "official"
+          ? "border-sky-300 bg-sky-50 text-sky-950"
+          : "border-slate-300 bg-white/90 text-slate-800"
+      }
+    >
+      {kind === "official" ? "Official project geometry" : "Estimated project area"}
     </Badge>
   )
 }
@@ -365,6 +399,7 @@ function ProjectDetailContent({
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={detail.displayStatus} />
+          <GeometryBadge kind={detail.geometryKind} />
           <span className="text-xs text-muted-foreground">{detail.category}</span>
         </div>
         <h2 className="font-heading text-lg font-semibold leading-tight">
@@ -387,6 +422,28 @@ function ProjectDetailContent({
       {detail.description && (
         <p className="text-sm leading-6 text-muted-foreground">{detail.description}</p>
       )}
+
+      <Alert className={detail.geometryKind === "estimated" ? "border-slate-300 bg-slate-50" : "border-sky-300 bg-sky-50"}>
+        <MapPinned aria-hidden="true" />
+        <AlertTitle>
+          {detail.geometryKind === "official" ? "Official project geometry" : "Estimated project area"}
+        </AlertTitle>
+        <AlertDescription>
+          {detail.geometryKind === "official"
+            ? `This shape was supplied by ${detail.geometrySource ?? "an official source"}.`
+            : "This 50 m area is an estimate around the recorded project coordinate, not an official project boundary."}
+          {detail.geometrySourceUrl && (
+            <a
+              className="ml-1 underline underline-offset-2"
+              href={detail.geometrySourceUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              View geometry source
+            </a>
+          )}
+        </AlertDescription>
+      </Alert>
 
       <section aria-labelledby="official-details-heading" className="space-y-3">
         <h3 id="official-details-heading" className="font-heading text-sm font-semibold">
@@ -539,8 +596,15 @@ function ProjectDetailPanel({
   )
 }
 
+const AREA_INTERACTIVE_LAYER_IDS = [
+  "project-area-official",
+  "project-area-official-fill",
+  "project-area-estimated-fill",
+  "project-area-estimated-outline",
+]
+
 function OfficialProjectMap({
-  styleUrl,
+  mapStyle,
   response,
   selectedId,
   camera,
@@ -549,7 +613,7 @@ function OfficialProjectMap({
   onProviderFailure,
   mapRef,
 }: {
-  styleUrl: string
+  mapStyle: ReturnType<typeof getMapStyle>
   response: ViewportResponse
   selectedId: string | null
   camera: CameraState
@@ -558,7 +622,9 @@ function OfficialProjectMap({
   onProviderFailure: () => void
   mapRef: React.RefObject<MapRef | null>
 }) {
-  const geoJson = useMemo(() => toGeoJson(response), [response])
+  const pointGeoJson = useMemo(() => toPointGeoJson(response), [response])
+  const displayGeoJson = useMemo(() => toDisplayGeoJson(response), [response])
+  const [overlapChoices, setOverlapChoices] = useState<ViewportFeature[]>([])
   const featuresById = useMemo(
     () => new Map(response.features.map((feature) => [feature.id, feature])),
     [response.features],
@@ -566,6 +632,26 @@ function OfficialProjectMap({
 
   const handleClick = useCallback(
     (event: MapLayerMouseEvent) => {
+      if (event.target.getZoom() >= 15) {
+        const point = event.point
+        const rendered = event.target.queryRenderedFeatures(
+          [[point.x - 8, point.y - 8], [point.x + 8, point.y + 8]],
+          { layers: AREA_INTERACTIVE_LAYER_IDS },
+        )
+        const ids = uniqueProjectIds(
+          rendered.map((feature) => String(feature.properties?.id ?? feature.id ?? "")),
+        )
+        const selectionKind = areaSelectionKind(ids)
+        if (selectionKind === "none") return
+        const choices = ids.flatMap((id) => {
+          const feature = featuresById.get(id)
+          return feature ? [feature] : []
+        })
+        if (selectionKind === "direct" && choices[0]) onSelect(choices[0])
+        else setOverlapChoices(choices)
+        return
+      }
+
       const feature = event.features?.[0]
       if (!feature) return
       if (feature.properties?.cluster) {
@@ -579,7 +665,7 @@ function OfficialProjectMap({
               number,
               number,
             ]
-            mapRef.current?.flyTo({ center: coordinates, zoom })
+            mapRef.current?.flyTo({ center: coordinates, zoom: Math.min(zoom, 15) })
           })
         }
         return
@@ -591,103 +677,209 @@ function OfficialProjectMap({
     [featuresById, mapRef, onSelect],
   )
 
+  const statusColor = [
+    "match",
+    ["get", "displayStatus"],
+    "ongoing",
+    "#f59e0b",
+    "completed",
+    "#22c55e",
+    "planned",
+    "#6366f1",
+    "#64748b",
+  ] as const
+
   return (
-    <MapLibre
-      ref={mapRef}
-      initialViewState={camera}
-      minZoom={7}
-      mapStyle={styleUrl}
-      interactiveLayerIds={["project-clusters", "projects-unclustered"]}
-      onClick={handleClick}
-      onLoad={(event) =>
-        onViewportSettled(
-          boundsFromMap(event.target),
-          {
-            latitude: event.target.getCenter().lat,
-            longitude: event.target.getCenter().lng,
-            zoom: event.target.getZoom(),
-          },
-        )
-      }
-      onMoveEnd={(event) =>
-        onViewportSettled(
-          boundsFromMap(event.target),
-          {
-            latitude: event.viewState.latitude,
-            longitude: event.viewState.longitude,
-            zoom: event.viewState.zoom,
-          },
-        )
-      }
-      onError={onProviderFailure}
-      attributionControl={{ compact: true }}
-      reuseMaps
-    >
-      <NavigationControl position="bottom-right" showCompass={false} />
-      <Source
-        id="official-projects"
-        type="geojson"
-        data={geoJson}
-        cluster
-        clusterMaxZoom={13}
-        clusterRadius={48}
+    <>
+      <MapLibre
+        ref={mapRef}
+        initialViewState={camera}
+        minZoom={7}
+        maxZoom={20}
+        mapStyle={mapStyle}
+        interactiveLayerIds={[
+          "project-clusters",
+          "projects-unclustered",
+          ...AREA_INTERACTIVE_LAYER_IDS,
+        ]}
+        onClick={handleClick}
+        onMouseEnter={(event) => { event.target.getCanvas().style.cursor = "pointer" }}
+        onMouseLeave={(event) => { event.target.getCanvas().style.cursor = "" }}
+        onLoad={(event) =>
+          onViewportSettled(
+            boundsFromMap(event.target),
+            {
+              latitude: event.target.getCenter().lat,
+              longitude: event.target.getCenter().lng,
+              zoom: event.target.getZoom(),
+            },
+          )
+        }
+        onMoveEnd={(event) =>
+          onViewportSettled(
+            boundsFromMap(event.target),
+            {
+              latitude: event.viewState.latitude,
+              longitude: event.viewState.longitude,
+              zoom: event.viewState.zoom,
+            },
+          )
+        }
+        onError={onProviderFailure}
+        attributionControl={{ compact: true }}
+        reuseMaps
       >
-        <Layer
-          id="project-clusters"
-          type="circle"
-          filter={["has", "point_count"]}
-          paint={{
-            "circle-color": "#475569",
-            "circle-radius": ["step", ["get", "point_count"], 18, 25, 22, 100, 28],
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#ffffff",
-          }}
-        />
-        <Layer
-          id="project-cluster-count"
-          type="symbol"
-          filter={["has", "point_count"]}
-          layout={{
-            "text-field": ["get", "point_count_abbreviated"],
-            "text-size": 12,
-          }}
-          paint={{ "text-color": "#ffffff" }}
-        />
-        <Layer
-          id="projects-unclustered"
-          type="circle"
-          filter={["!", ["has", "point_count"]]}
-          paint={{
-            "circle-color": [
-              "match",
-              ["get", "displayStatus"],
-              "ongoing",
-              "#d97706",
-              "completed",
-              "#16a34a",
-              "planned",
-              "#4f46e5",
-              "#64748b",
-            ],
-            "circle-radius": 7,
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#ffffff",
-          }}
-        />
-        <Layer
-          id="project-selected"
-          type="circle"
-          filter={["==", ["get", "id"], selectedId ?? ""]}
-          paint={{
-            "circle-color": "#0f172a",
-            "circle-radius": 12,
-            "circle-opacity": 0.2,
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#0f172a",
-          }}
-        />
-      </Source>
-    </MapLibre>
+        <NavigationControl position="bottom-right" showCompass={false} />
+        <Source
+          id="official-projects"
+          type="geojson"
+          data={pointGeoJson}
+          cluster
+          clusterMaxZoom={14}
+          clusterRadius={48}
+        >
+          <Layer
+            id="project-clusters"
+            type="circle"
+            maxzoom={15}
+            filter={["has", "point_count"]}
+            paint={{
+              "circle-color": "#475569",
+              "circle-radius": ["step", ["get", "point_count"], 18, 25, 22, 100, 28],
+              "circle-stroke-width": 2,
+              "circle-stroke-color": "#ffffff",
+            }}
+          />
+          <Layer
+            id="project-cluster-count"
+            type="symbol"
+            maxzoom={15}
+            filter={["has", "point_count"]}
+            layout={{
+              "text-field": ["get", "point_count_abbreviated"],
+              "text-size": 12,
+            }}
+            paint={{ "text-color": "#ffffff" }}
+          />
+          <Layer
+            id="projects-unclustered"
+            type="circle"
+            maxzoom={15}
+            filter={["!", ["has", "point_count"]]}
+            paint={{
+              "circle-color": statusColor,
+              "circle-radius": 7,
+              "circle-stroke-width": 2,
+              "circle-stroke-color": "#ffffff",
+            }}
+          />
+          <Layer
+            id="project-selected-point"
+            type="circle"
+            maxzoom={15}
+            filter={["==", ["get", "id"], selectedId ?? ""]}
+            paint={{
+              "circle-color": "#0f172a",
+              "circle-radius": 12,
+              "circle-opacity": 0.2,
+              "circle-stroke-width": 2,
+              "circle-stroke-color": "#0f172a",
+            }}
+          />
+        </Source>
+
+        <Source id="project-display-geometries" type="geojson" data={displayGeoJson}>
+          <Layer
+            id="project-area-estimated-fill"
+            type="fill"
+            minzoom={15}
+            filter={["all", ["==", ["get", "geometryKind"], "estimated"], ["==", ["geometry-type"], "Polygon"]]}
+            paint={{ "fill-color": statusColor, "fill-opacity": 0.2 }}
+          />
+          <Layer
+            id="project-area-estimated-outline"
+            type="line"
+            minzoom={15}
+            filter={["==", ["get", "geometryKind"], "estimated"]}
+            paint={{
+              "line-color": statusColor,
+              "line-width": 2.5,
+              "line-opacity": 0.95,
+              "line-dasharray": [2, 2],
+            }}
+          />
+          <Layer
+            id="project-area-official-fill"
+            type="fill"
+            minzoom={15}
+            filter={["all", ["==", ["get", "geometryKind"], "official"], ["==", ["geometry-type"], "Polygon"]]}
+            paint={{ "fill-color": statusColor, "fill-opacity": 0.32 }}
+          />
+          <Layer
+            id="project-area-official"
+            type="line"
+            minzoom={15}
+            filter={["==", ["get", "geometryKind"], "official"]}
+            paint={{
+              "line-color": statusColor,
+              "line-width": ["match", ["geometry-type"], "LineString", 8, 3],
+              "line-opacity": 0.95,
+            }}
+          />
+          <Layer
+            id="project-area-selected-fill"
+            type="fill"
+            minzoom={15}
+            filter={["all", ["==", ["get", "id"], selectedId ?? ""], ["==", ["geometry-type"], "Polygon"]]}
+            paint={{ "fill-color": "#ffffff", "fill-opacity": 0.22 }}
+          />
+          <Layer
+            id="project-area-selected-outline"
+            type="line"
+            minzoom={15}
+            filter={["==", ["get", "id"], selectedId ?? ""]}
+            paint={{ "line-color": "#ffffff", "line-width": 5, "line-opacity": 1 }}
+          />
+        </Source>
+      </MapLibre>
+
+      <Sheet
+        open={overlapChoices.length > 0}
+        onOpenChange={(open) => !open && setOverlapChoices([])}
+      >
+        <SheetContent side="bottom" className="max-h-[70dvh] rounded-t-2xl p-0 sm:mx-auto sm:max-w-xl">
+          <SheetHeader className="border-b pr-14">
+            <SheetTitle>Choose a project</SheetTitle>
+            <SheetDescription>
+              Multiple highlighted project areas overlap here.
+            </SheetDescription>
+          </SheetHeader>
+          <ul className="overflow-y-auto p-3" aria-label="Overlapping infrastructure projects">
+            {overlapChoices.map((feature) => (
+              <li key={feature.id}>
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-transparent p-3 text-left hover:border-border hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => {
+                    setOverlapChoices([])
+                    onSelect(feature)
+                  }}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <span className="font-medium">{feature.name}</span>
+                    <StatusBadge status={feature.displayStatus} />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="capitalize">{feature.category}</span>
+                    <GeometryBadge kind={feature.geometryKind} />
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </SheetContent>
+      </Sheet>
+    </>
   )
 }
 
@@ -720,7 +912,7 @@ export function ProjectMapSurface() {
   const viewportTimerRef = useRef<number | null>(null)
   const hasResponseRef = useRef(false)
   const lastBoundsRef = useRef(DEFAULT_BOUNDS)
-  const styleUrl = getMapStyleUrl()
+  const mapStyle = useMemo(() => getMapStyle(), [])
 
   const loadViewport = useCallback(async (bounds: ViewportBounds) => {
     const requestId = ++requestRef.current
@@ -747,8 +939,8 @@ export function ProjectMapSurface() {
   }, [])
 
   useEffect(() => {
-    if (!styleUrl) void loadViewport(DEFAULT_BOUNDS)
-  }, [loadViewport, styleUrl])
+    void loadViewport(DEFAULT_BOUNDS)
+  }, [loadViewport])
 
   useEffect(
     () => () => {
@@ -815,7 +1007,7 @@ export function ProjectMapSurface() {
     setListOpen(false)
     const search = writeProjectSearch(window.location.search, feature.id)
     window.history.pushState({ projectId: feature.id }, "", `${window.location.pathname}?${search}`)
-    mapRef.current?.flyTo({ center: feature.coordinates, zoom: Math.max(camera.zoom, 13) })
+    mapRef.current?.flyTo({ center: feature.coordinates, zoom: Math.max(camera.zoom, 15) })
   }, [camera.zoom])
 
   const closeProject = useCallback(() => {
@@ -840,8 +1032,7 @@ export function ProjectMapSurface() {
     [loadViewport],
   )
 
-  const mapStyleMissing = !styleUrl
-  const mapUnavailable = mapStyleMissing || styleFailure
+  const mapUnavailable = styleFailure
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:p-4">
@@ -871,9 +1062,9 @@ export function ProjectMapSurface() {
 
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,25rem)]">
         <section className="relative min-h-[34rem] overflow-hidden rounded-xl border bg-muted/30 lg:min-h-0" aria-label="Official project map">
-          {styleUrl && !styleFailure ? (
+          {!styleFailure ? (
             <OfficialProjectMap
-              styleUrl={styleUrl}
+              mapStyle={mapStyle}
               response={response}
               selectedId={selectedId}
               camera={camera}
@@ -886,18 +1077,12 @@ export function ProjectMapSurface() {
             />
           ) : (
             <MapStatePanel
-              title={mapStyleMissing ? "Map style configuration required" : "Map style unavailable"}
-              description={
-                mapStyleMissing
-                  ? "Set VITE_MAP_STYLE_URL to display the geographic map. The official project list remains available."
-                  : "The configured map style could not be loaded. Retry against the same configured provider."
-              }
+              title="Satellite map unavailable"
+              description="The configured satellite imagery could not be loaded. Project records remain available in the list."
               action={
-                !mapStyleMissing ? (
-                  <Button variant="outline" size="sm" onClick={() => setStyleFailure(false)}>
-                    <RefreshCw aria-hidden="true" /> Retry map style
-                  </Button>
-                ) : undefined
+                <Button variant="outline" size="sm" onClick={() => setStyleFailure(false)}>
+                  <RefreshCw aria-hidden="true" /> Retry satellite map
+                </Button>
               }
             />
           )}
@@ -912,15 +1097,26 @@ export function ProjectMapSurface() {
               Results are incomplete. Zoom in to see more projects; cluster counts show returned records only.
             </div>
           )}
-          <div className="absolute bottom-3 left-3 z-10 hidden rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur-sm md:block">
-            <div className="mb-2 text-xs font-medium">Status legend</div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+          <div className="absolute bottom-3 left-3 z-10 max-w-[15rem] rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur-sm md:max-w-xs">
+            <div className="mb-2 text-xs font-medium">Project map legend</div>
+            <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
               {(Object.keys(STATUS_LABELS) as DisplayStatus[]).map((status) => (
                 <div key={status} className="flex items-center gap-1.5">
                   <span className={`size-2.5 rounded-full ${STATUS_DOT_CLASSES[status]}`} aria-hidden="true" />
                   <span>{statusLabel(status)}</span>
                 </div>
               ))}
+            </div>
+            <div className="space-y-1 border-t pt-2 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-7 rounded-sm border-2 border-sky-600 bg-sky-400/40" aria-hidden="true" />
+                <span>Official project geometry</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-7 rounded-sm border-2 border-dashed border-slate-600 bg-slate-300/40" aria-hidden="true" />
+                <span>Estimated 50 m project area</span>
+              </div>
+              <p className="pt-1 text-muted-foreground">Zoom to 15+ to see highlighted areas.</p>
             </div>
           </div>
         </section>

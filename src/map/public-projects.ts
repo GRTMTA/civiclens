@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js"
+import type { StyleSpecification } from "maplibre-gl"
 import {
   parseProjectDetail,
   parseViewportPayload,
@@ -27,9 +28,36 @@ export function isMapConfigurationError(
   return error instanceof MapConfigurationError
 }
 
-export function getMapStyleUrl(): string | null {
-  const value = import.meta.env.VITE_MAP_STYLE_URL?.trim()
-  return value || null
+export const SATELLITE_ATTRIBUTION =
+  '<a href="https://s2maps.eu" target="_blank" rel="noreferrer">Sentinel-2 cloudless</a> by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2020)'
+
+export const SATELLITE_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    satellite: {
+      type: "raster",
+      tiles: [
+        "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg",
+      ],
+      tileSize: 256,
+      maxzoom: 14,
+      attribution: SATELLITE_ATTRIBUTION,
+    },
+  },
+  layers: [
+    {
+      id: "satellite",
+      type: "raster",
+      source: "satellite",
+    },
+  ],
+}
+
+export function getMapStyle(
+  configuredStyleUrl: string | undefined = import.meta.env.VITE_MAP_STYLE_URL,
+): string | StyleSpecification {
+  const value = configuredStyleUrl?.trim()
+  return value || SATELLITE_STYLE
 }
 
 export function createPublicRpcClient(): PublicRpcClient {
