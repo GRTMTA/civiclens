@@ -1,5 +1,5 @@
-import { Tabs } from "radix-ui"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Popover, Tabs } from "radix-ui"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   Map as MapLibre,
   NavigationControl,
@@ -17,6 +17,8 @@ import {
   Info,
   LocateFixed,
   MapPinned,
+  PanelRightClose,
+  PanelRightOpen,
   RefreshCw,
   Route,
   Search,
@@ -231,21 +233,25 @@ function MapStatePanel({
 function ProjectList({
   features,
   selectedId,
+  highlightedId,
   loading,
-  truncated,
   onSelect,
+  onHighlight,
   onRetry,
   queryError,
   configurationRequired,
+  onCollapse,
 }: {
   features: ViewportFeature[]
   selectedId: string | null
+  highlightedId: string | null
   loading: boolean
-  truncated: boolean
   onSelect: (feature: ViewportFeature) => void
+  onHighlight: (projectId: string | null) => void
   onRetry: () => void
   queryError: string | null
   configurationRequired: boolean
+  onCollapse?: () => void
 }) {
   const [visibleCount, setVisibleCount] = useState(PROJECT_LIST_PAGE_SIZE)
   const visibleFeatures = features.slice(0, visibleCount)
@@ -258,7 +264,7 @@ function ProjectList({
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card">
       <div className="flex items-start justify-between gap-3 border-b p-4">
-        <div>
+        <div className="min-w-0">
           <h2 className="font-heading text-base font-semibold">
             Projects in this view
           </h2>
@@ -266,20 +272,25 @@ function ProjectList({
             Official records at documented project locations
           </p>
         </div>
-        <Badge variant="secondary" aria-label={`${features.length} projects returned`}>
-          {features.length}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge variant="secondary" aria-label={`${features.length} projects returned`}>
+            {features.length}
+          </Badge>
+          {onCollapse && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-mr-2"
+              onClick={onCollapse}
+              aria-label="Hide projects panel"
+            >
+              <PanelRightClose aria-hidden="true" />
+              Hide projects
+            </Button>
+          )}
+        </div>
       </div>
-      {truncated && (
-        <Alert className="m-3 border-amber-300 bg-amber-50 text-amber-950">
-          <Info aria-hidden="true" />
-          <AlertTitle>Results are incomplete</AlertTitle>
-          <AlertDescription>
-            Zoom in to see more projects. Cluster counts represent returned
-            records, not every project in this area.
-          </AlertDescription>
-        </Alert>
-      )}
       {queryError && (
         <Alert variant="destructive" className="m-3">
           <AlertCircle aria-hidden="true" />
@@ -323,21 +334,26 @@ function ProjectList({
             <li key={feature.id}>
               <button
                 type="button"
-                className="w-full rounded-lg border border-transparent p-3 text-left transition hover:border-border hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-lg border border-transparent p-3 text-left transition hover:border-border hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring data-[highlighted=true]:border-ring/50 data-[highlighted=true]:bg-muted/80 data-[selected=true]:border-primary/60 data-[selected=true]:bg-primary/5 data-[selected=true]:shadow-sm"
                 data-selected={selectedId === feature.id}
+                data-highlighted={highlightedId === feature.id}
                 aria-current={selectedId === feature.id ? "true" : undefined}
                 onClick={() => onSelect(feature)}
+                onMouseEnter={() => onHighlight(feature.id)}
+                onMouseLeave={() => onHighlight(null)}
+                onFocus={() => onHighlight(feature.id)}
+                onBlur={() => onHighlight(null)}
               >
                 <div className="flex items-start justify-between gap-3">
                   <span className="line-clamp-2 text-sm font-medium">
-                    {feature.name}
+                    {readableProjectTitle(feature.name)}
                   </span>
                   <StatusBadge status={feature.displayStatus} />
                 </div>
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="capitalize">{feature.category}</span>
                   <span aria-hidden="true">·</span>
-                  <span>{feature.id}</span>
+                  <span className="font-mono text-[0.7rem]">{feature.id}</span>
                 </div>
               </button>
             </li>
@@ -515,7 +531,6 @@ function OsmRoadReviewPanel({
 }
 
 function ProjectDetailContent({
-  feature,
   detail,
   loading,
   error,
@@ -523,7 +538,6 @@ function ProjectDetailContent({
   isModerator,
   onGeometryReviewed,
 }: {
-  feature: ViewportFeature | null
   detail: ProjectDetail | null
   loading: boolean
   error: string | null
@@ -583,16 +597,32 @@ function ProjectDetailContent({
         <p className="text-sm text-muted-foreground">{detail.location}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3">
+      <dl className="grid gap-3 rounded-lg border bg-muted/30 p-3 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-xs text-muted-foreground">Official status</dt>
-          <dd className="mt-1 text-sm font-medium">{detail.status || "Unknown"}</dd>
+          <dd className="mt-1 font-medium">{statusLabel(detail.displayStatus)}</dd>
         </div>
         <div>
           <dt className="text-xs text-muted-foreground">Contract amount</dt>
-          <dd className="mt-1 text-sm font-medium">{formatMoney(detail.budget)}</dd>
+          <dd className="mt-1 font-medium">{formatMoney(detail.budget)}</dd>
         </div>
-      </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">Contractor</dt>
+          <dd className="mt-1 font-medium">{detail.contractor ?? "Not provided"}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">Contract ID</dt>
+          <dd className="mt-1 font-mono text-xs font-medium">{detail.contractId ?? "Not provided"}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">Start date</dt>
+          <dd className="mt-1 font-medium">{formatDate(detail.startDate)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">Completion date</dt>
+          <dd className="mt-1 font-medium">{formatDate(detail.completionDate)}</dd>
+        </div>
+      </dl>
 
       {detail.description && (
         <p className="text-sm leading-6 text-muted-foreground">{detail.description}</p>
@@ -654,22 +684,6 @@ function ProjectDetailContent({
             <dd className="text-right">{detail.agency}</dd>
           </div>
           <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Contractor</dt>
-            <dd className="text-right">{detail.contractor ?? "Not provided"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Contract ID</dt>
-            <dd className="text-right">{detail.contractId ?? "Not provided"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Start date</dt>
-            <dd className="text-right">{formatDate(detail.startDate)}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Completion date</dt>
-            <dd className="text-right">{formatDate(detail.completionDate)}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
             <dt className="text-muted-foreground">Progress</dt>
             <dd className="text-right">
               {detail.progress === undefined ? "Not provided" : `${detail.progress}%`}
@@ -722,9 +736,9 @@ function ProjectDetailContent({
       <p className="text-xs text-muted-foreground">
         Recorded project location: {detail.latitude.toFixed(5)}, {detail.longitude.toFixed(5)}
       </p>
-      {feature && feature.rawStatus !== detail.status && (
+      {hasDistinctSourceStatus(detail.status, detail.displayStatus) && (
         <p className="text-xs text-muted-foreground">
-          The map used the source status “{feature.rawStatus}”; this detail reflects the same official record.
+          Source status: <span className="font-medium">{detail.status}</span>. The normalized status above makes the source record easier to compare across projects.
         </p>
       )}
     </div>
@@ -733,7 +747,6 @@ function ProjectDetailContent({
 
 type ProjectDetailViewProps = {
   selectedId: string | null
-  feature: ViewportFeature | null
   detail: ProjectDetail | null
   loading: boolean
   error: string | null
@@ -742,9 +755,25 @@ type ProjectDetailViewProps = {
   onGeometryReviewed: () => Promise<void>
 }
 
+function readableProjectTitle(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed || trimmed !== trimmed.toUpperCase() || !/[A-Z]/.test(trimmed)) {
+    return value
+  }
+
+  return trimmed
+    .toLocaleLowerCase("en-PH")
+    .replace(/(^|[\s(/-])([a-z])/g, (_, prefix: string, letter: string) =>
+      `${prefix}${letter.toUpperCase()}`,
+    )
+}
+
+function hasDistinctSourceStatus(status: string, displayStatus: DisplayStatus) {
+  return status.trim().toLocaleLowerCase() !== statusLabel(displayStatus).toLocaleLowerCase()
+}
+
 function ProjectDetailView({
   selectedId,
-  feature,
   detail,
   loading,
   error,
@@ -814,7 +843,6 @@ function ProjectDetailView({
 
       <Tabs.Content value="details" className="min-h-0 flex-1 overflow-y-auto outline-none">
         <ProjectDetailContent
-          feature={feature}
           detail={detail}
           loading={loading}
           error={error}
@@ -879,6 +907,66 @@ function ProjectDetailView({
   )
 }
 
+function ProjectMapKey() {
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="bg-background/95 shadow-sm backdrop-blur-sm"
+          aria-label="Open project map key"
+        >
+          <Info aria-hidden="true" />
+          Map key
+        </Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          side="top"
+          align="start"
+          sideOffset={8}
+          className="z-50 w-[min(22rem,calc(100vw-2rem))] rounded-lg border bg-popover p-4 text-popover-foreground shadow-lg outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95"
+        >
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-sm font-semibold">Project map key</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Status colors describe the official source record. Geometry styles describe how the shape was obtained.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+              {(Object.keys(STATUS_LABELS) as DisplayStatus[]).map((status) => (
+                <div key={status} className="flex items-center gap-1.5">
+                  <span className={`size-2.5 rounded-full ${STATUS_DOT_CLASSES[status]}`} aria-hidden="true" />
+                  <span>{statusLabel(status)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2 border-t pt-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-7 rounded-sm border-2 border-sky-600 bg-sky-400/40" aria-hidden="true" />
+                <span>Official project geometry</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-7 border-t-[3px] border-dashed border-amber-600" aria-hidden="true" />
+                <span>Moderator-reviewed OSM estimate</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-7 rounded-sm border border-dashed border-slate-500 bg-slate-400/10" aria-hidden="true" />
+                <span>Generic estimated area, not an official boundary</span>
+              </div>
+              <p className="text-muted-foreground">Estimated areas appear only when the map is sufficiently zoomed in.</p>
+            </div>
+          </div>
+          <Popover.Arrow className="fill-popover" />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  )
+}
+
 function ProjectDetailDialog(props: ProjectDetailViewProps & { onClose: () => void }) {
   return (
     <MapDialog
@@ -893,21 +981,36 @@ function ProjectDetailDialog(props: ProjectDetailViewProps & { onClose: () => vo
   )
 }
 
-function ProjectDetailWorkspace(props: ProjectDetailViewProps & { onClose: () => void }) {
+function ProjectDetailWorkspace(props: ProjectDetailViewProps & { onClose: () => void; onCollapse?: () => void }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
-      <header className="flex shrink-0 items-start gap-3 border-b p-4">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="-ml-2 shrink-0"
-          onClick={props.onClose}
-        >
-          <ArrowLeft aria-hidden="true" />
-          Back to projects
-        </Button>
-        <div className="min-w-0">
+      <header className="shrink-0 border-b p-4">
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="-ml-2 shrink-0"
+            onClick={props.onClose}
+          >
+            <ArrowLeft aria-hidden="true" />
+            Back to projects
+          </Button>
+          {props.onCollapse && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-mr-2 shrink-0"
+              onClick={props.onCollapse}
+              aria-label="Hide projects panel"
+            >
+              <PanelRightClose aria-hidden="true" />
+              Hide projects
+            </Button>
+          )}
+        </div>
+        <div className="mt-3 min-w-0">
           <h2 className="font-heading text-base font-semibold">Official project details</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             Official record and explicitly linked resident discussions.
@@ -931,8 +1034,10 @@ function OfficialProjectMap({
   mapStyle,
   response,
   selectedId,
+  highlightedId,
   camera,
   onSelect,
+  onHighlight,
   onViewportSettled,
   onProviderFailure,
   mapRef,
@@ -940,8 +1045,10 @@ function OfficialProjectMap({
   mapStyle: ReturnType<typeof getMapStyle>
   response: ViewportResponse
   selectedId: string | null
+  highlightedId: string | null
   camera: CameraState
   onSelect: (feature: ViewportFeature) => void
+  onHighlight: (projectId: string | null) => void
   onViewportSettled: (bounds: ViewportBounds, camera: CameraState) => void
   onProviderFailure: () => void
   mapRef: React.RefObject<MapRef | null>
@@ -1027,8 +1134,16 @@ function OfficialProjectMap({
           ...AREA_INTERACTIVE_LAYER_IDS,
         ]}
         onClick={handleClick}
-        onMouseEnter={(event) => { event.target.getCanvas().style.cursor = "pointer" }}
-        onMouseLeave={(event) => { event.target.getCanvas().style.cursor = "" }}
+        onMouseMove={(event) => {
+          const feature = event.features?.find((item) => !item.properties?.cluster)
+          const id = feature?.properties?.id ?? feature?.id
+          onHighlight(id ? String(id) : null)
+          event.target.getCanvas().style.cursor = feature ? "pointer" : ""
+        }}
+        onMouseLeave={(event) => {
+          onHighlight(null)
+          event.target.getCanvas().style.cursor = ""
+        }}
         onLoad={(event) =>
           onViewportSettled(
             boundsFromMap(event.target),
@@ -1098,6 +1213,19 @@ function OfficialProjectMap({
             }}
           />
           <Layer
+            id="project-highlighted-point"
+            type="circle"
+            maxzoom={15}
+            filter={["==", ["get", "id"], highlightedId ?? ""]}
+            paint={{
+              "circle-color": "#ffffff",
+              "circle-radius": 10,
+              "circle-opacity": 0.2,
+              "circle-stroke-width": 3,
+              "circle-stroke-color": "#0f172a",
+            }}
+          />
+          <Layer
             id="project-selected-point"
             type="circle"
             maxzoom={15}
@@ -1118,7 +1246,7 @@ function OfficialProjectMap({
             type="fill"
             minzoom={15}
             filter={["all", ["==", ["get", "geometryKind"], "estimated"], ["==", ["geometry-type"], "Polygon"]]}
-            paint={{ "fill-color": statusColor, "fill-opacity": 0.2 }}
+            paint={{ "fill-color": "#64748b", "fill-opacity": 0.06 }}
           />
           <Layer
             id="project-area-estimated-outline"
@@ -1126,10 +1254,10 @@ function OfficialProjectMap({
             minzoom={15}
             filter={["==", ["get", "geometryKind"], "estimated"]}
             paint={{
-              "line-color": statusColor,
-              "line-width": 2.5,
-              "line-opacity": 0.95,
-              "line-dasharray": [2, 2],
+              "line-color": "#64748b",
+              "line-width": 1.25,
+              "line-opacity": 0.65,
+              "line-dasharray": [1, 2],
             }}
           />
           <Layer
@@ -1139,9 +1267,9 @@ function OfficialProjectMap({
             filter={["==", ["get", "geometryKind"], "reviewed_estimate"]}
             paint={{
               "line-color": statusColor,
-              "line-width": 7,
-              "line-opacity": 0.95,
-              "line-dasharray": [3, 1],
+              "line-width": 4,
+              "line-opacity": 0.8,
+              "line-dasharray": [2, 1],
             }}
           />
           <Layer
@@ -1163,11 +1291,23 @@ function OfficialProjectMap({
             }}
           />
           <Layer
+            id="project-area-highlighted-outline"
+            type="line"
+            minzoom={15}
+            filter={["==", ["get", "id"], highlightedId ?? ""]}
+            paint={{
+              "line-color": "#0f172a",
+              "line-width": 3,
+              "line-opacity": 0.85,
+              "line-dasharray": [1, 1],
+            }}
+          />
+          <Layer
             id="project-area-selected-fill"
             type="fill"
             minzoom={15}
             filter={["all", ["==", ["get", "id"], selectedId ?? ""], ["==", ["geometry-type"], "Polygon"]]}
-            paint={{ "fill-color": "#ffffff", "fill-opacity": 0.22 }}
+            paint={{ "fill-color": "#ffffff", "fill-opacity": 0.16 }}
           />
           <Layer
             id="project-area-selected-outline"
@@ -1214,15 +1354,29 @@ function OfficialProjectMap({
   )
 }
 
+function useMobileViewport() {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)")
+    const update = () => setIsMobile(media.matches)
+    update()
+    media.addEventListener("change", update)
+    return () => media.removeEventListener("change", update)
+  }, [])
+
+  return isMobile
+}
+
 export function ProjectMapSurface() {
   const initialUrlState = useMemo(() => readMapUrlState(window.location.search), [])
+  const isMobile = useMobileViewport()
   const [camera, setCamera] = useState<CameraState>(
     initialUrlState.camera ?? DEFAULT_CAMERA,
   )
   const [selectedId, setSelectedId] = useState<string | null>(
     initialUrlState.projectId,
   )
-  const [selectedFeature, setSelectedFeature] = useState<ViewportFeature | null>(null)
   const [response, setResponse] = useState<ViewportResponse>({
     features: [],
     truncated: false,
@@ -1237,6 +1391,8 @@ export function ProjectMapSurface() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [isModerator, setIsModerator] = useState(false)
   const [listOpen, setListOpen] = useState(false)
+  const [projectPanelOpen, setProjectPanelOpen] = useState(true)
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const mapRef = useRef<MapRef | null>(null)
   const clientRef = useRef<PublicRpcClient | null>(null)
   const requestRef = useRef(0)
@@ -1245,6 +1401,13 @@ export function ProjectMapSurface() {
   const hasResponseRef = useRef(false)
   const lastBoundsRef = useRef(DEFAULT_BOUNDS)
   const mapStyle = useMemo(() => getMapStyle(), [])
+
+  useLayoutEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      mapRef.current?.getMap().resize()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [projectPanelOpen])
 
   const loadViewport = useCallback(async (bounds: ViewportBounds) => {
     const requestId = ++requestRef.current
@@ -1298,11 +1461,6 @@ export function ProjectMapSurface() {
     [],
   )
 
-  useEffect(() => {
-    const feature = response.features.find((item) => item.id === selectedId) ?? null
-    setSelectedFeature(feature)
-  }, [response.features, selectedId])
-
   const loadDetails = useCallback(async () => {
     if (!selectedId) return
     const requestId = ++detailRequestRef.current
@@ -1332,6 +1490,10 @@ export function ProjectMapSurface() {
     }
   }, [loadDetails, selectedId])
 
+  useEffect(() => {
+    if (isMobile && selectedId) setListOpen(true)
+  }, [isMobile, selectedId])
+
   const refreshReviewedGeometry = useCallback(async () => {
     await Promise.all([
       loadDetails(),
@@ -1357,16 +1519,19 @@ export function ProjectMapSurface() {
 
   const selectProject = useCallback((feature: ViewportFeature) => {
     setSelectedId(feature.id)
-    setSelectedFeature(feature)
-    setListOpen(false)
+    if (isMobile) {
+      setListOpen(true)
+    } else {
+      setListOpen(false)
+      setProjectPanelOpen(true)
+    }
     const search = writeProjectSearch(window.location.search, feature.id)
     window.history.pushState({ projectId: feature.id }, "", `${window.location.pathname}?${search}`)
     mapRef.current?.flyTo({ center: feature.coordinates, zoom: Math.max(camera.zoom, 15) })
-  }, [camera.zoom])
+  }, [camera.zoom, isMobile])
 
   const closeProject = useCallback(() => {
     setSelectedId(null)
-    setSelectedFeature(null)
     const search = writeProjectSearch(window.location.search, null)
     window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}`)
   }, [])
@@ -1446,44 +1611,55 @@ export function ProjectMapSurface() {
               description="Pan or zoom the map to browse another area."
             />
           )}
+          {!projectPanelOpen && (queryError || queryState === "configuration") && !mapUnavailable && (
+            <MapStatePanel
+              title={queryState === "configuration" ? "Project data configuration required" : "Projects unavailable"}
+              description={queryError ?? "Configure the project data connection to browse official records."}
+              action={
+                queryState === "configuration" ? undefined : (
+                  <Button variant="outline" size="sm" onClick={() => void loadViewport(lastBoundsRef.current)}>
+                    <RefreshCw aria-hidden="true" /> Retry project query
+                  </Button>
+                )
+              }
+            />
+          )}
           {response.truncated && (
             <div className="absolute left-3 right-3 top-3 z-10 rounded-lg border border-amber-300 bg-amber-50/95 px-3 py-2 text-xs text-amber-950 shadow-sm backdrop-blur-sm">
               Results are incomplete. Zoom in to see more projects; cluster counts show returned records only.
             </div>
           )}
-          <div className="absolute bottom-3 left-3 z-10 max-w-[15rem] rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur-sm md:max-w-xs">
-            <div className="mb-2 text-xs font-medium">Project map legend</div>
-            <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-              {(Object.keys(STATUS_LABELS) as DisplayStatus[]).map((status) => (
-                <div key={status} className="flex items-center gap-1.5">
-                  <span className={`size-2.5 rounded-full ${STATUS_DOT_CLASSES[status]}`} aria-hidden="true" />
-                  <span>{statusLabel(status)}</span>
-                </div>
-              ))}
+          <div className="absolute bottom-3 left-3 z-10">
+            <ProjectMapKey />
+          </div>
+          {!projectPanelOpen && (
+            <div className="absolute right-3 top-3 z-10">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="bg-background/95 shadow-sm backdrop-blur-sm"
+                onClick={() => setProjectPanelOpen(true)}
+              >
+                <PanelRightOpen aria-hidden="true" />
+                Show projects · {response.features.length}
+              </Button>
             </div>
-            <div className="space-y-1 border-t pt-2 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-7 rounded-sm border-2 border-sky-600 bg-sky-400/40" aria-hidden="true" />
-                <span>Official project geometry</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-7 border-t-[3px] border-dashed border-amber-600" aria-hidden="true" />
-                <span>Reviewed OSM estimate</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-7 rounded-sm border-2 border-dashed border-slate-600 bg-slate-300/40" aria-hidden="true" />
-                <span>Estimated 50 m project area</span>
-              </div>
-              <p className="pt-1 text-muted-foreground">Zoom to 15+ to see highlighted areas.</p>
-            </div>
+          )}
+          {projectPanelOpen && (
+            <span className="sr-only" aria-live="polite">
+              Project panel is visible
+            </span>
+          )}
+          <div className="sr-only" aria-live="polite">
+            {highlightedId ? `Highlighted project ${highlightedId}` : ""}
           </div>
         </section>
 
-        <aside className="hidden min-h-0 flex-col gap-3 lg:flex">
+        {projectPanelOpen && <aside className="hidden min-h-0 flex-col gap-3 lg:flex">
           {selectedId ? (
             <ProjectDetailWorkspace
               selectedId={selectedId}
-              feature={selectedFeature}
               detail={detail}
               loading={detailLoading}
               error={detailError}
@@ -1491,20 +1667,23 @@ export function ProjectMapSurface() {
               onClose={closeProject}
               isModerator={isModerator}
               onGeometryReviewed={refreshReviewedGeometry}
+              onCollapse={() => setProjectPanelOpen(false)}
             />
           ) : (
             <ProjectList
               features={response.features}
               selectedId={selectedId}
+              highlightedId={highlightedId}
               loading={queryState === "loading" || queryState === "refreshing"}
-              truncated={response.truncated}
               onSelect={selectProject}
+              onHighlight={setHighlightedId}
               onRetry={() => void loadViewport(lastBoundsRef.current)}
               queryError={queryError}
               configurationRequired={queryState === "configuration"}
+              onCollapse={() => setProjectPanelOpen(false)}
             />
           )}
-        </aside>
+        </aside>}
       </div>
 
       <div className="flex items-center justify-between gap-2 lg:hidden">
@@ -1517,40 +1696,63 @@ export function ProjectMapSurface() {
         </div>
       </div>
 
-      <Sheet open={listOpen} onOpenChange={setListOpen}>
+      <Sheet
+        open={listOpen}
+        onOpenChange={(open) => {
+          setListOpen(open)
+          if (!open && selectedId) closeProject()
+        }}
+      >
         <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-2xl p-0">
-          <SheetHeader className="border-b">
-            <SheetTitle>Projects in this view</SheetTitle>
-            <SheetDescription>
-              Select an official record from the current map area.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex min-h-0 h-[55dvh] p-3">
-            <ProjectList
-              features={response.features}
+          {selectedId ? (
+            <ProjectDetailWorkspace
               selectedId={selectedId}
-            loading={queryState === "loading" || queryState === "refreshing"}
-              truncated={response.truncated}
-              onSelect={selectProject}
-            onRetry={() => void loadViewport(lastBoundsRef.current)}
-            queryError={queryError}
-            configurationRequired={queryState === "configuration"}
+              detail={detail}
+              loading={detailLoading}
+              error={detailError}
+              onRetry={() => void loadDetails()}
+              onClose={closeProject}
+              isModerator={isModerator}
+              onGeometryReviewed={refreshReviewedGeometry}
             />
-          </div>
+          ) : (
+            <>
+              <SheetHeader className="border-b">
+                <SheetTitle>Projects in this view</SheetTitle>
+                <SheetDescription>
+                  Select an official record from the current map area.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex h-[55dvh] min-h-0 p-3">
+                <ProjectList
+                  features={response.features}
+                  selectedId={selectedId}
+                  highlightedId={highlightedId}
+                  loading={queryState === "loading" || queryState === "refreshing"}
+                  onSelect={selectProject}
+                  onHighlight={setHighlightedId}
+                  onRetry={() => void loadViewport(lastBoundsRef.current)}
+                  queryError={queryError}
+                  configurationRequired={queryState === "configuration"}
+                />
+              </div>
+            </>
+          )}
         </SheetContent>
       </Sheet>
-      <ProjectDetailDialog
-        key={selectedId ?? "closed-project"}
-        selectedId={selectedId}
-        feature={selectedFeature}
-        detail={detail}
-        loading={detailLoading}
-        error={detailError}
-        onRetry={() => void loadDetails()}
-        onClose={closeProject}
-        isModerator={isModerator}
-        onGeometryReviewed={refreshReviewedGeometry}
-      />
+      {!isMobile && (
+        <ProjectDetailDialog
+          key={selectedId ?? "closed-project"}
+          selectedId={selectedId}
+          detail={detail}
+          loading={detailLoading}
+          error={detailError}
+          onRetry={() => void loadDetails()}
+          onClose={closeProject}
+          isModerator={isModerator}
+          onGeometryReviewed={refreshReviewedGeometry}
+        />
+      )}
     </div>
   )
 }
