@@ -11,6 +11,7 @@ import {
 import type { ExpressionSpecification, GeoJSONSource } from "maplibre-gl"
 import {
   AlertCircle,
+  ArrowLeft,
   CheckCircle2,
   CircleHelp,
   Info,
@@ -730,27 +731,27 @@ function ProjectDetailContent({
   )
 }
 
-function ProjectDetailDialog({
-  selectedId,
-  feature,
-  detail,
-  loading,
-  error,
-  onRetry,
-  onClose,
-  isModerator,
-  onGeometryReviewed,
-}: {
+type ProjectDetailViewProps = {
   selectedId: string | null
   feature: ViewportFeature | null
   detail: ProjectDetail | null
   loading: boolean
   error: string | null
   onRetry: () => void
-  onClose: () => void
   isModerator: boolean
   onGeometryReviewed: () => Promise<void>
-}) {
+}
+
+function ProjectDetailView({
+  selectedId,
+  feature,
+  detail,
+  loading,
+  error,
+  onRetry,
+  isModerator,
+  onGeometryReviewed,
+}: ProjectDetailViewProps) {
   const [activeTab, setActiveTab] = useState<"details" | "community">("details")
   const [posts, setPosts] = useState<CommunityPost[]>([])
   const [postsState, setPostsState] = useState<"idle" | "loading" | "ready" | "error">("idle")
@@ -783,106 +784,138 @@ function ProjectDetailDialog({
   }, [activeTab, loadPosts, postsState])
 
   return (
+    <Tabs.Root
+      value={activeTab}
+      onValueChange={(value) => setActiveTab(value as "details" | "community")}
+      className="flex min-h-0 w-full flex-1 flex-col"
+    >
+      <Tabs.List
+        aria-label="Project information sections"
+        className="grid w-full shrink-0 grid-cols-2 gap-1 border-b border-border px-4 pt-2 sm:px-5"
+      >
+        <Tabs.Trigger
+          value="details"
+          className="flex min-h-11 items-center justify-center rounded-t-md border-b-2 border-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-primary data-[state=active]:text-foreground"
+        >
+          Project details
+        </Tabs.Trigger>
+        <Tabs.Trigger
+          value="community"
+          className="flex min-h-11 items-center justify-center rounded-t-md border-b-2 border-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-primary data-[state=active]:text-foreground"
+        >
+          Community posts
+          {postsState === "ready" && (
+            <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[0.65rem] tabular-nums">
+              {posts.length}
+            </span>
+          )}
+        </Tabs.Trigger>
+      </Tabs.List>
+
+      <Tabs.Content value="details" className="min-h-0 flex-1 overflow-y-auto outline-none">
+        <ProjectDetailContent
+          feature={feature}
+          detail={detail}
+          loading={loading}
+          error={error}
+          onRetry={onRetry}
+          isModerator={isModerator}
+          onGeometryReviewed={onGeometryReviewed}
+        />
+      </Tabs.Content>
+
+      <Tabs.Content
+        value="community"
+        className="min-h-0 flex-1 overflow-y-auto p-4 outline-none sm:p-5"
+      >
+        <div className="mb-4 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground">
+          These are resident discussions explicitly linked to this project. They are not official project updates or verified findings.
+        </div>
+
+        {postsState === "loading" && (
+          <div className="space-y-3" aria-label="Loading project community posts">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton key={index} className="h-32 w-full rounded-lg" />
+            ))}
+          </div>
+        )}
+
+        {postsState === "error" && (
+          <Alert variant="destructive">
+            <AlertCircle aria-hidden="true" />
+            <AlertTitle>Community posts unavailable</AlertTitle>
+            <AlertDescription className="space-y-3">
+              <p>{postsError}</p>
+              <Button type="button" size="sm" variant="outline" onClick={() => void loadPosts()}>
+                <RefreshCw aria-hidden="true" /> Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {postsState === "ready" && posts.length === 0 && (
+          <div className="rounded-lg border border-dashed border-border px-5 py-12 text-center">
+            <p className="text-sm font-medium">No community posts for this project yet</p>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Discussions appear here only when residents explicitly link them to this project.
+            </p>
+          </div>
+        )}
+
+        {postsState === "ready" && posts.length > 0 && (
+          <div className="space-y-3" aria-label="Community posts linked to this project">
+            {posts.map((post) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                onVote={() => undefined}
+                canInteract={false}
+              />
+            ))}
+          </div>
+        )}
+      </Tabs.Content>
+    </Tabs.Root>
+  )
+}
+
+function ProjectDetailDialog(props: ProjectDetailViewProps & { onClose: () => void }) {
+  return (
     <MapDialog
-      open={Boolean(selectedId)}
-      onOpenChange={(open) => !open && onClose()}
+      open={Boolean(props.selectedId)}
+      onOpenChange={(open) => !open && props.onClose()}
       size="project"
       title="Project information"
       description="Official project details and explicitly linked resident discussions."
     >
-      <Tabs.Root
-        value={activeTab}
-        onValueChange={(value) => setActiveTab(value as "details" | "community")}
-        className="flex min-h-0 w-full flex-1 flex-col"
-      >
-        <Tabs.List
-          aria-label="Project information sections"
-          className="grid w-full shrink-0 grid-cols-2 gap-1 border-b border-border px-4 pt-2 sm:px-5"
-        >
-          <Tabs.Trigger
-            value="details"
-            className="flex min-h-11 items-center justify-center rounded-t-md border-b-2 border-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-primary data-[state=active]:text-foreground"
-          >
-            Project details
-          </Tabs.Trigger>
-          <Tabs.Trigger
-            value="community"
-            className="flex min-h-11 items-center justify-center rounded-t-md border-b-2 border-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-primary data-[state=active]:text-foreground"
-          >
-            Community posts
-            {postsState === "ready" && (
-              <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[0.65rem] tabular-nums">
-                {posts.length}
-              </span>
-            )}
-          </Tabs.Trigger>
-        </Tabs.List>
-
-        <Tabs.Content value="details" className="min-h-0 flex-1 overflow-y-auto outline-none">
-          <ProjectDetailContent
-            feature={feature}
-            detail={detail}
-            loading={loading}
-            error={error}
-            onRetry={onRetry}
-            isModerator={isModerator}
-            onGeometryReviewed={onGeometryReviewed}
-          />
-        </Tabs.Content>
-
-        <Tabs.Content
-          value="community"
-          className="min-h-0 flex-1 overflow-y-auto p-4 outline-none sm:p-5"
-        >
-          <div className="mb-4 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground">
-            These are resident discussions explicitly linked to this project. They are not official project updates or verified findings.
-          </div>
-
-          {postsState === "loading" && (
-            <div className="space-y-3" aria-label="Loading project community posts">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <Skeleton key={index} className="h-32 w-full rounded-lg" />
-              ))}
-            </div>
-          )}
-
-          {postsState === "error" && (
-            <Alert variant="destructive">
-              <AlertCircle aria-hidden="true" />
-              <AlertTitle>Community posts unavailable</AlertTitle>
-              <AlertDescription className="space-y-3">
-                <p>{postsError}</p>
-                <Button type="button" size="sm" variant="outline" onClick={() => void loadPosts()}>
-                  <RefreshCw aria-hidden="true" /> Retry
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {postsState === "ready" && posts.length === 0 && (
-            <div className="rounded-lg border border-dashed border-border px-5 py-12 text-center">
-              <p className="text-sm font-medium">No community posts for this project yet</p>
-              <p className="mt-1.5 text-sm text-muted-foreground">
-                Discussions appear here only when residents explicitly link them to this project.
-              </p>
-            </div>
-          )}
-
-          {postsState === "ready" && posts.length > 0 && (
-            <div className="space-y-3" aria-label="Community posts linked to this project">
-              {posts.map((post) => (
-                <PostCard
-                  key={post.id}
-                  post={post}
-                  onVote={() => undefined}
-                  canInteract={false}
-                />
-              ))}
-            </div>
-          )}
-        </Tabs.Content>
-      </Tabs.Root>
+      <ProjectDetailView {...props} />
     </MapDialog>
+  )
+}
+
+function ProjectDetailWorkspace(props: ProjectDetailViewProps & { onClose: () => void }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+      <header className="flex shrink-0 items-start gap-3 border-b p-4">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-ml-2 shrink-0"
+          onClick={props.onClose}
+        >
+          <ArrowLeft aria-hidden="true" />
+          Back to projects
+        </Button>
+        <div className="min-w-0">
+          <h2 className="font-heading text-base font-semibold">Official project details</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Official record and explicitly linked resident discussions.
+          </p>
+        </div>
+      </header>
+      <ProjectDetailView {...props} />
+    </div>
   )
 }
 
@@ -1447,16 +1480,30 @@ export function ProjectMapSurface() {
         </section>
 
         <aside className="hidden min-h-0 flex-col gap-3 lg:flex">
-          <ProjectList
-            features={response.features}
-            selectedId={selectedId}
-            loading={queryState === "loading" || queryState === "refreshing"}
-            truncated={response.truncated}
-            onSelect={selectProject}
-            onRetry={() => void loadViewport(lastBoundsRef.current)}
-            queryError={queryError}
-            configurationRequired={queryState === "configuration"}
-          />
+          {selectedId ? (
+            <ProjectDetailWorkspace
+              selectedId={selectedId}
+              feature={selectedFeature}
+              detail={detail}
+              loading={detailLoading}
+              error={detailError}
+              onRetry={() => void loadDetails()}
+              onClose={closeProject}
+              isModerator={isModerator}
+              onGeometryReviewed={refreshReviewedGeometry}
+            />
+          ) : (
+            <ProjectList
+              features={response.features}
+              selectedId={selectedId}
+              loading={queryState === "loading" || queryState === "refreshing"}
+              truncated={response.truncated}
+              onSelect={selectProject}
+              onRetry={() => void loadViewport(lastBoundsRef.current)}
+              queryError={queryError}
+              configurationRequired={queryState === "configuration"}
+            />
+          )}
         </aside>
       </div>
 
