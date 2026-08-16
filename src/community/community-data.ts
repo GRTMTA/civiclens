@@ -109,6 +109,7 @@ export type CommunitySource = {
 export type Viewer = {
   id: string
   name: string
+  email: string
   username: string | null
   avatarUrl: string | null
   bio: string
@@ -617,6 +618,7 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
       return {
         id: user.id,
         name: asString(profile?.display_name) || user.email?.split("@")[0] || "You",
+        email: user.email ?? "",
         username: asString(profile?.username) || null,
         avatarUrl: avatarPath ? publicUrl(AVATAR_BUCKET, avatarPath) : null,
         bio: asString(profile?.bio),

@@ -21,6 +21,9 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { NavUser, navUserFromViewer } from "@/components/nav-user"
+import { requestSignIn } from "./community-auth"
+import type { Viewer } from "./community-data"
 import { listTopics, type SortOption, type TopicId } from "./community-contract"
 import { TOPIC_ICONS } from "./topic-chip"
 
@@ -47,12 +50,18 @@ export function CommunitySidebar({
   onSortChange,
   topic,
   onTopicChange,
+  viewer,
+  viewerReady = false,
+  onSignOut,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   sort: SortOption
   onSortChange: (sort: SortOption) => void
   topic: TopicId | null
   onTopicChange: (topic: TopicId | null) => void
+  viewer?: Viewer | null
+  viewerReady?: boolean
+  onSignOut?: () => void
 }) {
   const topics = listTopics().filter((item) => item.id !== "other")
   const { isMobile, setOpenMobile } = useSidebar()
@@ -158,13 +167,12 @@ export function CommunitySidebar({
       </SidebarContent>
 
       <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton className="text-sidebar-foreground/70">
-              <span className="truncate">Resident discussion</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <NavUser
+          user={viewer ? navUserFromViewer(viewer) : null}
+          ready={viewerReady}
+          onSignIn={requestSignIn}
+          onSignOut={onSignOut}
+        />
       </SidebarFooter>
     </Sidebar>
   )

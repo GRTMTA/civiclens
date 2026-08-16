@@ -1,11 +1,9 @@
 import * as React from "react"
 import { IconInfoCircle } from "@tabler/icons-react"
 
-import { AuthMenu } from "@/components/auth-menu"
 import { Separator } from "@/components/ui/separator"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
-import { requestSignIn } from "./community-auth"
 import { CommunitySidebar } from "./community-sidebar"
 import type { SortOption, TopicId } from "./community-contract"
 import type { Viewer } from "./community-data"
@@ -14,8 +12,8 @@ import type { Viewer } from "./community-data"
  * Quiet note for residents browsing without an account.
  *
  * Discussion is readable anonymously, so this explains why the write controls
- * behave differently rather than hiding the content behind a wall. It carries
- * no button: the header's `AuthMenu` is the single sign-in call to action.
+ * behave differently rather than hiding the content behind a wall. The
+ * account control lives in the sidebar footer.
  */
 function GuestNote() {
   return (
@@ -78,6 +76,9 @@ export function CommunityShell({
             onSortChange={onSortChange}
             topic={topic}
             onTopicChange={onTopicChange}
+            viewer={viewer}
+            viewerReady={viewerReady}
+            onSignOut={onSignOut}
           />
           {/*
             `min-w-0` (not `overflow-x-hidden`) is what prevents horizontal
@@ -96,18 +97,10 @@ export function CommunityShell({
                 <SidebarTrigger className="-ml-1" />
                 <Separator
                   orientation="vertical"
-                  className="mx-1.5 data-[orientation=vertical]:h-4"
+                  className="mx-1.5 h-4 self-center"
                 />
                 <h1 className="truncate text-sm font-medium">{headerTitle}</h1>
                 {breadcrumb}
-                <div className="ml-auto flex shrink-0 items-center">
-                  <AuthMenu
-                    viewer={viewer ?? null}
-                    ready={viewerReady}
-                    onSignIn={requestSignIn}
-                    onSignOut={onSignOut ?? (() => {})}
-                  />
-                </div>
               </div>
             </header>
 

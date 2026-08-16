@@ -1555,39 +1555,17 @@ export function ProjectMapSurface() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            Source records
-          </p>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">
-            Infrastructure projects
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Browse source-attributed infrastructure records by documented project location.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
-          {queryState === "refreshing" && <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />}
-          {queryState === "loading"
-            ? "Loading visible projects…"
-            : queryState === "refreshing"
-              ? "Updating this area…"
-              : queryState === "configuration"
-                ? "Project data configuration required"
-                : "Map area ready"}
-        </div>
-      </div>
-
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,25rem)]">
+      <div className={`grid min-h-0 flex-1 gap-3 ${projectPanelOpen ? "lg:grid-cols-[minmax(0,1fr)_25rem]" : "lg:grid-cols-1"}`}>
         <section className="relative min-h-[34rem] overflow-hidden rounded-xl border bg-muted/30 lg:min-h-0" aria-label="Official project map">
           {!styleFailure ? (
             <OfficialProjectMap
               mapStyle={mapStyle}
               response={response}
               selectedId={selectedId}
+              highlightedId={highlightedId}
               camera={camera}
               onSelect={selectProject}
+              onHighlight={setHighlightedId}
               onViewportSettled={onViewportSettled}
               onProviderFailure={() => {
                 setStyleFailure(true)
