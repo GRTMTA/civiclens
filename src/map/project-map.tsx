@@ -11,6 +11,8 @@ import type { ExpressionSpecification, GeoJSONSource } from "maplibre-gl"
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Info,
   LocateFixed,
@@ -39,7 +41,6 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -67,12 +68,22 @@ import {
   ItemHeader,
   ItemTitle,
 } from "@/components/ui/item"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { ProjectCommunityContext } from "./project-community-context"
 import { ProjectTimeline } from "./project-timeline"
 import {
@@ -293,21 +304,21 @@ function ProjectList({
   features,
   selectedId,
   loading,
-  truncated,
   onSelect,
   onRetry,
   queryError,
   configurationRequired,
+  onCollapse,
   showHeader = true,
 }: {
   features: ViewportFeature[]
   selectedId: string | null
   loading: boolean
-  truncated: boolean
   onSelect: (feature: ViewportFeature) => void
   onRetry: () => void
   queryError: string | null
   configurationRequired: boolean
+  onCollapse?: () => void
   showHeader?: boolean
 }) {
   const [visibleCount, setVisibleCount] = useState(PROJECT_LIST_PAGE_SIZE)
@@ -324,27 +335,26 @@ function ProjectList({
       className="flex min-h-0 flex-1 gap-0 rounded-xl py-0 shadow-sm ring-1 ring-border"
     >
       {showHeader && (
-        <CardHeader className="shrink-0 border-b px-4 py-4">
-          <CardTitle>Projects in this view</CardTitle>
-          <CardDescription className="text-xs">
-            Official records at documented project locations
-          </CardDescription>
-          <CardAction>
+        <CardHeader className="shrink-0 border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2">
+            <span>Projects in this view</span>
             <Badge variant="secondary" aria-label={`${features.length} projects returned`}>
               {features.length}
             </Badge>
+          </CardTitle>
+          <CardAction className="self-center">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              onClick={onCollapse}
+              aria-label="Collapse projects panel"
+              title="Collapse projects panel"
+            >
+              <ChevronRight aria-hidden="true" />
+            </Button>
           </CardAction>
         </CardHeader>
-      )}
-      {truncated && (
-        <Alert className="m-3 mb-0 border-primary/30 bg-primary/10 text-foreground">
-          <Info aria-hidden="true" />
-          <AlertTitle>Results are incomplete</AlertTitle>
-          <AlertDescription>
-            Zoom in to see more projects. Cluster counts represent returned
-            records, not every project in this area.
-          </AlertDescription>
-        </Alert>
       )}
       {queryError && (
         <Alert variant="destructive" className="m-3 mb-0">
@@ -1350,12 +1360,12 @@ function OfficialProjectMap({
         )}
         <Source
           id="official-projects"
-          type="geojson"
-          data={pointGeoJson}
-          cluster
-          clusterMaxZoom={14}
-          clusterRadius={48}
-        >
+            type="geojson"
+            data={pointGeoJson}
+            cluster
+            clusterMaxZoom={14}
+            clusterRadius={48}
+          >
           <Layer
             id="project-clusters"
             type="circle"
@@ -1561,6 +1571,7 @@ export function ProjectMapSurface() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [isModerator, setIsModerator] = useState(false)
   const [listOpen, setListOpen] = useState(false)
+  const [projectsPanelCollapsed, setProjectsPanelCollapsed] = useState(false)
   const mapRef = useRef<MapRef | null>(null)
   const clientRef = useRef<PublicRpcClient | null>(null)
   const requestRef = useRef(0)
@@ -1757,33 +1768,39 @@ export function ProjectMapSurface() {
   }, [])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            Source records
-          </p>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">
-            Infrastructure projects
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Browse source-attributed infrastructure records by documented project location.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
-          {(queryState === "loading" || queryState === "refreshing") && <Spinner aria-hidden="true" />}
-          {queryState === "loading"
-            ? "Loading visible projects…"
-            : queryState === "refreshing"
-              ? "Updating this area…"
-              : queryState === "configuration"
-                ? "Project data configuration required"
-                : "Map area ready"}
-        </div>
-      </div>
-
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,25rem)]">
+    <div className="flex min-h-0 flex-1 flex-col p-3 md:p-4">
+      <div className={`grid min-h-0 flex-1 gap-3 ${projectsPanelCollapsed ? "lg:grid-cols-[minmax(0,1fr)_2.5rem]" : "lg:grid-cols-[minmax(0,1fr)_minmax(20rem,25rem)]"}`}>
         <section className="relative min-h-[34rem] overflow-hidden rounded-xl border bg-muted/30 lg:min-h-0" aria-label="Official project map">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className="absolute right-3 top-3 z-20 flex size-7 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur-sm"
+                role="status"
+                aria-label={
+                  queryState === "loading" || queryState === "refreshing"
+                    ? "Updating map"
+                    : queryState === "configuration" || queryError
+                      ? "Project data unavailable"
+                      : "Map ready"
+                }
+              >
+                {queryState === "loading" || queryState === "refreshing" ? (
+                  <Spinner aria-hidden="true" />
+                ) : queryState === "configuration" || queryError ? (
+                  <AlertCircle className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <CheckCircle2 className="size-3.5" aria-hidden="true" />
+                )}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {queryState === "loading" || queryState === "refreshing"
+                ? "Updating projects"
+                : queryState === "configuration" || queryError
+                  ? "Project data unavailable"
+                  : "Map ready"}
+            </TooltipContent>
+          </Tooltip>
           {mapProvider ? (
             <OfficialProjectMap
               key={mapProvider.id}
@@ -1808,24 +1825,30 @@ export function ProjectMapSurface() {
               }
             />
           )}
-          {response.truncated && (
-            <div className="absolute left-3 right-3 top-3 z-10 rounded-lg border border-primary/30 bg-background/95 px-3 py-2 text-xs text-foreground shadow-sm backdrop-blur-sm">
-              Results are incomplete. Zoom in to see more projects; cluster counts show returned records only.
-            </div>
-          )}
-          <Card
-            size="sm"
-            className="absolute bottom-3 left-3 z-10 max-w-[15rem] gap-0 rounded-xl bg-background/95 py-0 shadow-sm backdrop-blur-sm md:max-w-xs"
-          >
-            <CardHeader className="px-3 pb-2 pt-3">
-              <CardTitle className="text-xs">Project map legend</CardTitle>
-            </CardHeader>
-            <CardContent className="px-3 pb-3">
-              <div className="mb-2 flex items-center gap-2 text-xs">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="outline"
+                className="absolute bottom-3 left-3 z-10 size-8 rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
+                aria-label="Show project map legend"
+              >
+                <CircleHelp aria-hidden="true" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              side="top"
+              align="start"
+              sideOffset={8}
+              className="w-64 gap-2 rounded-xl bg-background/95 p-3 backdrop-blur-sm"
+            >
+              <p className="font-heading text-xs font-medium">Project map legend</p>
+              <div className="flex items-center gap-2 border-t pt-2 text-xs">
                 <span className="size-3 rounded-full border-2 border-white bg-red-600 ring-1 ring-red-900" aria-hidden="true" />
                 <span>Project location marker</span>
               </div>
-              <div className="space-y-1 border-t pt-2 text-xs">
+              <div className="space-y-1 text-xs">
                 <div className="flex items-center gap-2">
                   <span className="h-2 w-7 rounded-sm border-2 border-primary bg-primary/25" aria-hidden="true" />
                   <span>Official project geometry</span>
@@ -1846,21 +1869,35 @@ export function ProjectMapSurface() {
                   {mapProvider ? `${mapProvider.name} · ` : ""}3D view begins at zoom 15.
                 </p>
               </div>
-            </CardContent>
-          </Card>
+            </PopoverContent>
+          </Popover>
         </section>
 
-        <aside className="hidden min-h-0 flex-col gap-3 lg:flex">
-          <ProjectList
-            features={response.features}
-            selectedId={selectedId}
-            loading={queryState === "loading" || queryState === "refreshing"}
-            truncated={response.truncated}
-            onSelect={selectProject}
-            onRetry={() => void loadViewport(lastBoundsRef.current)}
-            queryError={queryError}
-            configurationRequired={queryState === "configuration"}
-          />
+        <aside className="hidden min-h-0 flex-col lg:flex">
+          {projectsPanelCollapsed ? (
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="outline"
+              className="self-start rounded-xl"
+              onClick={() => setProjectsPanelCollapsed(false)}
+              aria-label="Expand projects panel"
+              title="Expand projects panel"
+            >
+              <ChevronLeft aria-hidden="true" />
+            </Button>
+          ) : (
+            <ProjectList
+              features={response.features}
+              selectedId={selectedId}
+              loading={queryState === "loading" || queryState === "refreshing"}
+              onSelect={selectProject}
+              onRetry={() => void loadViewport(lastBoundsRef.current)}
+              queryError={queryError}
+              configurationRequired={queryState === "configuration"}
+              onCollapse={() => setProjectsPanelCollapsed(true)}
+            />
+          )}
         </aside>
       </div>
 
@@ -1893,7 +1930,6 @@ export function ProjectMapSurface() {
               features={response.features}
               selectedId={selectedId}
               loading={queryState === "loading" || queryState === "refreshing"}
-              truncated={response.truncated}
               onSelect={selectProject}
               onRetry={() => void loadViewport(lastBoundsRef.current)}
               queryError={queryError}
