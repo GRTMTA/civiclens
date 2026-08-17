@@ -1,4 +1,3 @@
-import { Tabs } from "radix-ui"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Map as MapLibre,
@@ -21,36 +20,82 @@ import {
   Search,
 } from "lucide-react"
 
+import { communityActionDecision, requestSignIn } from "@/community/community-auth"
+import { CreatePostModal } from "@/community/create-post-modal"
+import { isCommunityMediaError } from "@/community/community-data"
 import { PostCard } from "@/community/post-card"
-import { getCommunitySource } from "@/community/community-data"
-import type { CommunityPost } from "@/community/community-contract"
+import { useCommunityAccess } from "@/community/use-community"
+import type {
+  CommunityPost,
+  NewPostInput,
+  ProjectReference,
+} from "@/community/community-contract"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
-import { Skeleton } from "@/components/ui/skeleton"
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemHeader,
+  ItemTitle,
+} from "@/components/ui/item"
+import { Progress } from "@/components/ui/progress"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ProjectCommunityContext } from "./project-community-context"
 import { ProjectTimeline } from "./project-timeline"
 import {
   createPublicRpcClient,
   fetchProjectDetail,
   fetchViewportProjects,
-  getMapStyle,
+  getMapProviders,
   isCurrentUserModerator,
   isMapConfigurationError,
+  mapPitchForZoom,
+  nextMapProviderIndex,
+  OPENFREEMAP_BUILDING_LAYER,
   saveReviewedOsmEstimate,
+  shouldScheduleMapProviderFallback,
+  type MapProvider,
   type PublicRpcClient,
 } from "./public-projects"
 import { MapDialog } from "./map-dialog"
+import {
+  addPublishedProjectPost,
+  optimisticallyVoteProjectPost,
+  setProjectPostVote,
+} from "./project-community-state"
 import {
   fetchOsmRoadCandidates,
   type OsmRoadCandidate,
@@ -92,18 +137,23 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   unknown: "Unknown status",
 }
 
-const STATUS_CLASSES: Record<DisplayStatus, string> = {
-  ongoing: "border-amber-300 bg-amber-50 text-amber-950",
-  completed: "border-emerald-300 bg-emerald-50 text-emerald-950",
-  planned: "border-indigo-300 bg-indigo-50 text-indigo-950",
-  unknown: "border-slate-300 bg-slate-100 text-slate-800",
+// MapLibre cannot consume CSS variables, so mirror the CivicLens blue ramp here.
+// Labels and geometry stroke patterns continue to provide the primary distinctions.
+const MAP_STATUS_COLORS: Record<DisplayStatus, string> = {
+  ongoing: "#60a5fa",
+  completed: "#93c5fd",
+  planned: "#3b82f6",
+  unknown: "#64748b",
 }
 
-const STATUS_DOT_CLASSES: Record<DisplayStatus, string> = {
-  ongoing: "bg-amber-600",
-  completed: "bg-emerald-600",
-  planned: "bg-indigo-600",
-  unknown: "bg-slate-500",
+const PROJECT_INDICATOR_COLOR = "#dc2626"
+const PROJECT_INDICATOR_DARK = "#7f1d1d"
+
+const STATUS_CLASSES: Record<DisplayStatus, string> = {
+  ongoing: "border-primary/40 bg-primary/15 text-primary",
+  completed: "border-border bg-secondary text-secondary-foreground",
+  planned: "border-border bg-muted text-foreground",
+  unknown: "border-border bg-muted/60 text-muted-foreground",
 }
 
 function statusLabel(status: DisplayStatus) {
@@ -147,6 +197,8 @@ function featureProperties(feature: ViewportFeature) {
     displayStatus: feature.displayStatus,
     geometryKind: feature.geometryKind,
     geometrySource: feature.geometrySource ?? "",
+    geometryEstimateMethod: feature.geometryEstimateMethod ?? "",
+    geometryEstimateClass: feature.geometryEstimateClass ?? "",
   }
 }
 
@@ -185,19 +237,29 @@ function StatusBadge({ status }: { status: DisplayStatus }) {
   )
 }
 
-function GeometryBadge({ kind }: { kind: GeometryKind }) {
-  const label =
-    kind === "official"
-      ? "Official project geometry"
-      : kind === "reviewed_estimate"
-        ? "Reviewed OSM estimate"
-        : "Estimated project area"
+function geometryLabel(kind: GeometryKind, method?: ProjectDetail["geometryEstimateMethod"]) {
+  if (kind === "official") return "Official project geometry"
+  if (kind === "reviewed_estimate") return "Reviewed OSM estimate"
+  if (kind === "estimated" || method === "radius_circle") return "Estimated project indicator · 50 m radius"
+  return "Estimated project route/building · OSM"
+}
+
+function GeometryBadge({
+  kind,
+  method,
+}: {
+  kind: GeometryKind
+  method?: ProjectDetail["geometryEstimateMethod"]
+}) {
+  const label = geometryLabel(kind, method)
   const classes =
     kind === "official"
-      ? "border-sky-300 bg-sky-50 text-sky-950"
+      ? "border-primary/40 bg-primary/15 text-primary"
       : kind === "reviewed_estimate"
-        ? "border-amber-300 bg-amber-50 text-amber-950"
-        : "border-slate-300 bg-white/90 text-slate-800"
+        ? "border-border bg-secondary text-secondary-foreground"
+        : kind === "automatic_estimate"
+          ? "border-border bg-muted text-foreground"
+          : "border-border bg-muted/60 text-muted-foreground"
 
   return (
     <Badge variant="outline" className={classes}>
@@ -236,6 +298,7 @@ function ProjectList({
   onRetry,
   queryError,
   configurationRequired,
+  showHeader = true,
 }: {
   features: ViewportFeature[]
   selectedId: string | null
@@ -245,6 +308,7 @@ function ProjectList({
   onRetry: () => void
   queryError: string | null
   configurationRequired: boolean
+  showHeader?: boolean
 }) {
   const [visibleCount, setVisibleCount] = useState(PROJECT_LIST_PAGE_SIZE)
   const visibleFeatures = features.slice(0, visibleCount)
@@ -255,22 +319,25 @@ function ProjectList({
   }, [features])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card">
-      <div className="flex items-start justify-between gap-3 border-b p-4">
-        <div>
-          <h2 className="font-heading text-base font-semibold">
-            Projects in this view
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
+    <Card
+      size="sm"
+      className="flex min-h-0 flex-1 gap-0 rounded-xl py-0 shadow-sm ring-1 ring-border"
+    >
+      {showHeader && (
+        <CardHeader className="shrink-0 border-b px-4 py-4">
+          <CardTitle>Projects in this view</CardTitle>
+          <CardDescription className="text-xs">
             Official records at documented project locations
-          </p>
-        </div>
-        <Badge variant="secondary" aria-label={`${features.length} projects returned`}>
-          {features.length}
-        </Badge>
-      </div>
+          </CardDescription>
+          <CardAction>
+            <Badge variant="secondary" aria-label={`${features.length} projects returned`}>
+              {features.length}
+            </Badge>
+          </CardAction>
+        </CardHeader>
+      )}
       {truncated && (
-        <Alert className="m-3 border-amber-300 bg-amber-50 text-amber-950">
+        <Alert className="m-3 mb-0 border-primary/30 bg-primary/10 text-foreground">
           <Info aria-hidden="true" />
           <AlertTitle>Results are incomplete</AlertTitle>
           <AlertDescription>
@@ -280,7 +347,7 @@ function ProjectList({
         </Alert>
       )}
       {queryError && (
-        <Alert variant="destructive" className="m-3">
+        <Alert variant="destructive" className="m-3 mb-0">
           <AlertCircle aria-hidden="true" />
           <AlertTitle>Project query unavailable</AlertTitle>
           <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
@@ -292,7 +359,7 @@ function ProjectList({
         </Alert>
       )}
       {configurationRequired && (
-        <Alert className="m-3 border-amber-300 bg-amber-50 text-amber-950">
+        <Alert className="m-3 mb-0 border-primary/30 bg-primary/10 text-foreground">
           <Info aria-hidden="true" />
           <AlertTitle>Project data configuration required</AlertTitle>
           <AlertDescription>
@@ -300,65 +367,93 @@ function ProjectList({
           </AlertDescription>
         </Alert>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto p-2" aria-live="polite">
-        {loading && features.length === 0 && (
-          <div className="space-y-2 p-2" aria-label="Loading projects">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <Skeleton key={index} className="h-20 w-full" />
-            ))}
-          </div>
-        )}
-        {!loading && !queryError && !configurationRequired && features.length === 0 && (
-          <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 p-5 text-center">
-            <Search className="size-7 text-muted-foreground" aria-hidden="true" />
-            <p className="font-medium">No official projects in this view</p>
-            <p className="text-sm text-muted-foreground">
-              Pan or zoom the map to browse another area.
-            </p>
-          </div>
-        )}
-        <ul className="space-y-1" aria-label="Official projects">
-          {visibleFeatures.map((feature) => (
-            <li key={feature.id}>
-              <button
+      <CardContent className="flex min-h-0 flex-1 px-0">
+        <ScrollArea className="min-h-0 flex-1" aria-live="polite">
+          <div className="p-2">
+            {loading && features.length === 0 && (
+              <div className="space-y-2 p-2" aria-label="Loading projects">
+                <div className="flex items-center gap-2 px-1 pb-1 text-xs text-muted-foreground">
+                  <Spinner aria-hidden="true" /> Loading visible projects…
+                </div>
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <Skeleton key={index} className="h-[4.25rem] w-full rounded-xl" />
+                ))}
+              </div>
+            )}
+            {!loading && !queryError && !configurationRequired && features.length === 0 && (
+              <Empty className="min-h-40 gap-3 border-0 p-5">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Search aria-hidden="true" />
+                  </EmptyMedia>
+                  <EmptyTitle className="text-base">No official projects in this view</EmptyTitle>
+                  <EmptyDescription>
+                    Pan or zoom the map to browse another area.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
+            <ul className="space-y-1" aria-label="Official projects">
+              {visibleFeatures.map((feature) => {
+                const selected = selectedId === feature.id
+                return (
+                  <Item
+                    key={feature.id}
+                    asChild
+                    size="xs"
+                    variant={selected ? "muted" : "default"}
+                    className="relative rounded-xl border-transparent px-3 py-2.5 hover:border-border hover:bg-muted/60 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 data-[selected=true]:border-primary/20 data-[selected=true]:bg-primary/5"
+                  >
+                    <li data-selected={selected}>
+                      <button
+                        type="button"
+                        className="absolute inset-0 z-10 rounded-xl outline-none"
+                        aria-label={`${feature.name}, ${statusLabel(feature.displayStatus)}, ${feature.category}, ${feature.id}`}
+                        aria-current={selected ? "true" : undefined}
+                        onClick={() => onSelect(feature)}
+                      />
+                      <ItemContent className="pointer-events-none min-w-0 gap-1" aria-hidden="true">
+                        <ItemHeader className="items-start">
+                          <ItemTitle className="line-clamp-2 w-auto min-w-0 text-left">
+                            {feature.name}
+                          </ItemTitle>
+                          <ItemActions className="shrink-0">
+                            <StatusBadge status={feature.displayStatus} />
+                          </ItemActions>
+                        </ItemHeader>
+                        <ItemDescription className="flex items-center gap-2 text-xs">
+                          <span className="capitalize">{feature.category}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="truncate">{feature.id}</span>
+                        </ItemDescription>
+                      </ItemContent>
+                    </li>
+                  </Item>
+                )
+              })}
+            </ul>
+            {hasMore && (
+              <Button
                 type="button"
-                className="w-full rounded-lg border border-transparent p-3 text-left transition hover:border-border hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
-                data-selected={selectedId === feature.id}
-                aria-current={selectedId === feature.id ? "true" : undefined}
-                onClick={() => onSelect(feature)}
+                variant="outline"
+                className="mt-2 w-full"
+                onClick={() => setVisibleCount((count) => count + PROJECT_LIST_PAGE_SIZE)}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <span className="line-clamp-2 text-sm font-medium">
-                    {feature.name}
-                  </span>
-                  <StatusBadge status={feature.displayStatus} />
-                </div>
-                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="capitalize">{feature.category}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{feature.id}</span>
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-        {hasMore && (
-          <Button
-            type="button"
-            variant="outline"
-            className="mt-2 w-full"
-            onClick={() => setVisibleCount((count) => count + PROJECT_LIST_PAGE_SIZE)}
-          >
-            Show {Math.min(PROJECT_LIST_PAGE_SIZE, features.length - visibleFeatures.length)} more
-          </Button>
-        )}
-      </div>
-      <div className="border-t p-3 text-xs text-muted-foreground">
-        {loading && features.length > 0
-          ? "Updating this area…"
-          : `Showing ${visibleFeatures.length} of ${features.length} returned`}
-      </div>
-    </div>
+                Show {Math.min(PROJECT_LIST_PAGE_SIZE, features.length - visibleFeatures.length)} more
+              </Button>
+            )}
+          </div>
+        </ScrollArea>
+      </CardContent>
+      <CardFooter className="shrink-0 justify-between border-t px-4 py-3 text-xs text-muted-foreground">
+        <span>
+          {loading && features.length > 0
+            ? "Updating this area…"
+            : `Showing ${visibleFeatures.length} of ${features.length} returned`}
+        </span>
+        {loading && features.length > 0 && <Spinner aria-hidden="true" />}
+      </CardFooter>
+    </Card>
   )
 }
 
@@ -419,11 +514,11 @@ function OsmRoadReviewPanel({
 
   if (!open) {
     return (
-      <section className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-950">
-          <Route className="size-4" aria-hidden="true" /> Moderator geometry review
+      <section className="space-y-2 rounded-lg border border-primary/30 bg-primary/10 p-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Route className="size-4 text-primary" aria-hidden="true" /> Moderator geometry review
         </h3>
-        <p className="text-xs leading-5 text-amber-950/80">
+        <p className="text-xs leading-5 text-muted-foreground">
           Find nearby OpenStreetMap roads and approve one short segment as a reviewed estimate. It will never be labeled official.
         </p>
         <Button type="button" size="sm" variant="outline" onClick={() => void loadCandidates()}>
@@ -434,19 +529,19 @@ function OsmRoadReviewPanel({
   }
 
   return (
-    <section className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3" aria-labelledby="osm-review-heading">
+    <section className="space-y-3 rounded-lg border border-primary/30 bg-primary/10 p-3" aria-labelledby="osm-review-heading">
       <div>
-        <h3 id="osm-review-heading" className="flex items-center gap-2 text-sm font-semibold text-amber-950">
-          <Route className="size-4" aria-hidden="true" /> Review nearby OSM road segments
+        <h3 id="osm-review-heading" className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Route className="size-4 text-primary" aria-hidden="true" /> Review nearby OSM road segments
         </h3>
-        <p className="mt-1 text-xs leading-5 text-amber-950/80">
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
           Candidates are clipped to roughly 300 m around the DPWH point. Confirm the road against project documents before approval.
         </p>
       </div>
 
-      {loading && <p className="text-sm text-amber-950" aria-live="polite">Loading nearby roads…</p>}
+      {loading && <p className="text-sm text-foreground" aria-live="polite">Loading nearby roads…</p>}
       {!loading && candidates.length === 0 && !error && (
-        <p className="text-sm text-amber-950">No mapped roads were found within 100 m.</p>
+        <p className="text-sm text-foreground">No mapped roads were found within 100 m.</p>
       )}
       {candidates.length > 0 && (
         <ul className="space-y-2" aria-label="Nearby OpenStreetMap road candidates">
@@ -455,7 +550,7 @@ function OsmRoadReviewPanel({
               <button
                 type="button"
                 aria-pressed={selected?.osmWayId === candidate.osmWayId}
-                className="w-full rounded-md border bg-white p-2 text-left text-sm aria-pressed:border-amber-600 aria-pressed:ring-2 aria-pressed:ring-amber-300"
+                className="w-full rounded-md border border-border bg-card p-2 text-left text-sm text-card-foreground aria-pressed:border-primary aria-pressed:ring-2 aria-pressed:ring-primary/30"
                 onClick={() => setSelected(candidate)}
               >
                 <span className="block font-medium">{candidate.name}</span>
@@ -464,7 +559,7 @@ function OsmRoadReviewPanel({
                 </span>
               </button>
               <a
-                className="mt-1 inline-block text-xs text-amber-900 underline underline-offset-2"
+                className="mt-1 inline-block text-xs text-primary underline underline-offset-2"
                 href={candidate.sourceUrl}
                 target="_blank"
                 rel="noreferrer"
@@ -478,7 +573,7 @@ function OsmRoadReviewPanel({
 
       {selected && (
         <div className="space-y-2">
-          <label htmlFor={`osm-review-note-${detail.id}`} className="text-xs font-medium text-amber-950">
+          <label htmlFor={`osm-review-note-${detail.id}`} className="text-xs font-medium text-foreground">
             Review justification
           </label>
           <Input
@@ -502,11 +597,11 @@ function OsmRoadReviewPanel({
 
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
       {saved && (
-        <p className="flex items-center gap-1 text-xs font-medium text-emerald-800" role="status">
+        <p className="flex items-center gap-1 text-xs font-medium text-primary" role="status">
           <CheckCircle2 className="size-4" aria-hidden="true" /> Reviewed estimate saved.
         </p>
       )}
-      <p className="text-[11px] leading-4 text-amber-950/70">
+      <p className="text-[11px] leading-4 text-muted-foreground">
         Road data © OpenStreetMap contributors, ODbL. The request sends only this project coordinate to the configured Overpass service.
       </p>
     </section>
@@ -573,7 +668,7 @@ function ProjectDetailContent({
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={detail.displayStatus} />
-          <GeometryBadge kind={detail.geometryKind} />
+          <GeometryBadge kind={detail.geometryKind} method={detail.geometryEstimateMethod} />
           <span className="text-xs text-muted-foreground">{detail.category}</span>
         </div>
         <h2 className="font-heading text-lg font-semibold leading-tight">
@@ -582,16 +677,33 @@ function ProjectDetailContent({
         <p className="text-sm text-muted-foreground">{detail.location}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3">
-        <div>
-          <dt className="text-xs text-muted-foreground">Official status</dt>
-          <dd className="mt-1 text-sm font-medium">{detail.status || "Unknown"}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-muted-foreground">Contract amount</dt>
-          <dd className="mt-1 text-sm font-medium">{formatMoney(detail.budget)}</dd>
-        </div>
-      </div>
+      <Card size="sm" className="gap-0 rounded-xl bg-muted/30 py-0 shadow-none ring-1 ring-border">
+        <CardContent className="p-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Official status</p>
+              <p className="mt-1 text-sm font-medium">{detail.status || "Unknown"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Contract amount</p>
+              <p className="mt-1 text-sm font-medium">{formatMoney(detail.budget)}</p>
+            </div>
+            {detail.progress !== undefined && (
+              <div className="col-span-2 border-t pt-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">Official progress</p>
+                  <p className="text-sm font-medium tabular-nums">{detail.progress}%</p>
+                </div>
+                <Progress
+                  value={detail.progress}
+                  aria-label="Official project progress"
+                  aria-valuetext={`${detail.progress}%`}
+                />
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {detail.description && (
         <p className="text-sm leading-6 text-muted-foreground">{detail.description}</p>
@@ -599,26 +711,24 @@ function ProjectDetailContent({
 
       <Alert className={
         detail.geometryKind === "official"
-          ? "border-sky-300 bg-sky-50"
+          ? "border-primary/30 bg-primary/10 text-foreground"
           : detail.geometryKind === "reviewed_estimate"
-            ? "border-amber-300 bg-amber-50"
-            : "border-slate-300 bg-slate-50"
+            ? "border-border bg-secondary text-secondary-foreground"
+            : detail.geometryKind === "automatic_estimate"
+              ? "border-border bg-muted text-foreground"
+              : "border-border bg-muted/60 text-muted-foreground"
       }>
         <MapPinned aria-hidden="true" />
-        <AlertTitle>
-          {detail.geometryKind === "official"
-            ? "Official project geometry"
-            : detail.geometryKind === "reviewed_estimate"
-              ? "Moderator-reviewed OSM estimate"
-              : "Estimated project area"}
-        </AlertTitle>
+        <AlertTitle>{geometryLabel(detail.geometryKind, detail.geometryEstimateMethod)}</AlertTitle>
         <AlertDescription className="space-y-1">
           <p>
             {detail.geometryKind === "official"
               ? `This shape was supplied by ${detail.geometrySource ?? "an official source"}.`
               : detail.geometryKind === "reviewed_estimate"
                 ? "A moderator selected this OpenStreetMap road segment as a plausible project route. It is not an official DPWH boundary."
-                : "This 50 m area is an estimate around the recorded project coordinate, not an official project boundary."}
+                : detail.geometryKind === "automatic_estimate"
+                  ? "This is the nearest eligible OpenStreetMap road or building within 50 m of the recorded project point. It is an automatic approximation, not an official project measurement."
+                  : "No eligible nearby OpenStreetMap feature was available, so this 50 m radius circle is a rough indicator around the recorded project point, not an official boundary."}
             {detail.geometrySourceUrl && (
               <a
                 className="ml-1 underline underline-offset-2"
@@ -630,6 +740,12 @@ function ProjectDetailContent({
               </a>
             )}
           </p>
+          {detail.geometryEstimateClass && detail.geometryKind !== "official" && detail.geometryKind !== "reviewed_estimate" && (
+            <p className="text-xs capitalize">
+              Estimate type: {detail.geometryEstimateClass.replace(/_/g, " ")}
+              {detail.geometryEstimateMethod === "radius_circle" ? " fallback circle (50 m radius)" : " nearest OSM match"}
+            </p>
+          )}
           {detail.geometryReviewNote && (
             <p className="text-xs">Review note: {detail.geometryReviewNote}</p>
           )}
@@ -668,12 +784,12 @@ function ProjectDetailContent({
             <dt className="text-muted-foreground">Completion date</dt>
             <dd className="text-right">{formatDate(detail.completionDate)}</dd>
           </div>
-          <div className="flex justify-between gap-4 border-b pb-2">
-            <dt className="text-muted-foreground">Progress</dt>
-            <dd className="text-right">
-              {detail.progress === undefined ? "Not provided" : `${detail.progress}%`}
-            </dd>
-          </div>
+          {detail.progress === undefined && (
+            <div className="flex justify-between gap-4 border-b pb-2">
+              <dt className="text-muted-foreground">Progress</dt>
+              <dd className="text-right">Not provided</dd>
+            </div>
+          )}
           <div className="flex justify-between gap-4 border-b pb-2">
             <dt className="text-muted-foreground">Amount paid</dt>
             <dd className="text-right">{formatMoney(detail.amountPaid)}</dd>
@@ -755,15 +871,27 @@ function ProjectDetailDialog({
   const [posts, setPosts] = useState<CommunityPost[]>([])
   const [postsState, setPostsState] = useState<"idle" | "loading" | "ready" | "error">("idle")
   const [postsError, setPostsError] = useState<string | null>(null)
+  const [composerOpen, setComposerOpen] = useState(false)
+  const [interactionError, setInteractionError] = useState<string | null>(null)
+  const [publishMessage, setPublishMessage] = useState<string | null>(null)
+  const [pendingVoteIds, setPendingVoteIds] = useState<Set<string>>(() => new Set())
   const postsRequestRef = useRef(0)
+  const voteGenerationRef = useRef(0)
+  const pendingVoteIdsRef = useRef(new Set<string>())
+  const { source, configError, viewerReady, canInteract } = useCommunityAccess()
 
   const loadPosts = useCallback(async () => {
     if (!selectedId) return
+    if (!source) {
+      setPostsError(configError ?? "Community discussion is unavailable.")
+      setPostsState("error")
+      return
+    }
     const requestId = ++postsRequestRef.current
     setPostsState("loading")
     setPostsError(null)
     try {
-      const nextPosts = await getCommunitySource().listPostsForProject(selectedId)
+      const nextPosts = await source.listPostsForProject(selectedId)
       if (requestId !== postsRequestRef.current) return
       setPosts(nextPosts)
       setPostsState("ready")
@@ -776,113 +904,297 @@ function ProjectDetailDialog({
       )
       setPostsState("error")
     }
+  }, [configError, selectedId, source])
+
+  useEffect(() => {
+    postsRequestRef.current += 1
+    voteGenerationRef.current += 1
+    pendingVoteIdsRef.current.clear()
+    setPendingVoteIds(new Set())
+    setPosts([])
+    setPostsState("idle")
+    setPostsError(null)
+    setInteractionError(null)
+    setPublishMessage(null)
+    setComposerOpen(false)
   }, [selectedId])
 
   useEffect(() => {
     if (activeTab === "community" && postsState === "idle") void loadPosts()
   }, [activeTab, loadPosts, postsState])
 
+  const selectedProject = useMemo<ProjectReference | null>(() => {
+    if (!selectedId) return null
+    return {
+      id: selectedId,
+      name: detail?.name ?? feature?.name ?? selectedId,
+    }
+  }, [detail?.name, feature?.name, selectedId])
+
+  const runCommunityAction = useCallback(
+    (action: () => void) => {
+      const decision = communityActionDecision(canInteract, viewerReady)
+      if (decision === "allow") action()
+      else if (decision === "sign-in") requestSignIn()
+    },
+    [canInteract, viewerReady],
+  )
+
+  const createProjectPost = useCallback(
+    async (input: NewPostInput) => {
+      if (!source) throw new Error(configError ?? "Community discussion is unavailable.")
+      setInteractionError(null)
+      setPublishMessage(null)
+
+      try {
+        const created = await source.createPost(input)
+        setPosts((current) => addPublishedProjectPost(current, created, selectedId ?? ""))
+        if (created.project?.id === selectedId) {
+          setPostsState("ready")
+          setPublishMessage("Your post was published and added to this project's Community posts.")
+        } else if (created.project) {
+          setPublishMessage(
+            `Your post was published and linked to ${created.project.name}, so it does not appear in this project's list.`,
+          )
+        } else {
+          setPublishMessage(
+            "Your post was published to Community without a project link, so it does not appear in this project's list.",
+          )
+        }
+        return created
+      } catch (cause) {
+        if (isCommunityMediaError(cause)) {
+          const published = cause.publishedPost
+          if (published) {
+            setPosts((current) =>
+              addPublishedProjectPost(current, published, selectedId ?? ""),
+            )
+            if (published.project?.id === selectedId) setPostsState("ready")
+          } else if (input.projectId === selectedId) {
+            await loadPosts()
+          }
+          const destination =
+            input.projectId === selectedId
+              ? " It remains linked to this project's Community posts."
+              : " It does not appear in this project's list because its project link was changed or removed."
+          setPublishMessage(`${cause.message}${destination}`)
+          return published ?? undefined
+        }
+        const message =
+          cause instanceof Error ? cause.message : "Your post could not be published."
+        setInteractionError(message)
+        throw cause
+      }
+    },
+    [configError, loadPosts, selectedId, source],
+  )
+
+  const voteOnProjectPost = useCallback(
+    (postId: string, direction: 1 | -1) => {
+      runCommunityAction(() => {
+        if (!source || pendingVoteIdsRef.current.has(postId)) return
+        const currentPost = posts.find((post) => post.id === postId)
+        if (!currentPost) return
+
+        const previous = {
+          score: currentPost.score,
+          viewerVote: currentPost.viewerVote,
+        }
+        const generation = voteGenerationRef.current
+        pendingVoteIdsRef.current.add(postId)
+        setPendingVoteIds(new Set(pendingVoteIdsRef.current))
+        setInteractionError(null)
+        setPosts((current) =>
+          optimisticallyVoteProjectPost(current, postId, direction),
+        )
+
+        source
+          .votePost(postId, direction)
+          .then(
+            (next) => {
+              if (voteGenerationRef.current !== generation) return
+              setPosts((current) => setProjectPostVote(current, postId, next))
+            },
+            (cause: unknown) => {
+              if (voteGenerationRef.current !== generation) return
+              setPosts((current) => setProjectPostVote(current, postId, previous))
+              setInteractionError(
+                cause instanceof Error ? cause.message : "Your vote could not be saved.",
+              )
+            },
+          )
+          .finally(() => {
+            pendingVoteIdsRef.current.delete(postId)
+            setPendingVoteIds(new Set(pendingVoteIdsRef.current))
+          })
+      })
+    },
+    [posts, runCommunityAction, source],
+  )
+
   return (
-    <MapDialog
-      open={Boolean(selectedId)}
-      onOpenChange={(open) => !open && onClose()}
-      size="project"
-      title="Project information"
-      description="Official project details and explicitly linked resident discussions."
-    >
-      <Tabs.Root
+    <>
+      <MapDialog
+        open={Boolean(selectedId)}
+        onOpenChange={(open) => !open && onClose()}
+        size="project"
+        title="Project information"
+        description="Official project details and explicitly linked resident discussions."
+      >
+      <Tabs
         value={activeTab}
         onValueChange={(value) => setActiveTab(value as "details" | "community")}
-        className="flex min-h-0 w-full flex-1 flex-col"
+        className="flex min-h-0 w-full flex-1 flex-col gap-0"
       >
-        <Tabs.List
+        <TabsList
+          variant="line"
           aria-label="Project information sections"
-          className="grid w-full shrink-0 grid-cols-2 gap-1 border-b border-border px-4 pt-2 sm:px-5"
+          className="grid h-12 w-full shrink-0 grid-cols-2 gap-0 self-stretch rounded-none border-b border-border bg-muted/30 p-0"
         >
-          <Tabs.Trigger
+          <TabsTrigger
             value="details"
-            className="flex min-h-11 items-center justify-center rounded-t-md border-b-2 border-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-primary data-[state=active]:text-foreground"
+            className="h-full min-h-12 rounded-none border-0 border-b-2 border-transparent px-4 py-0 text-center text-muted-foreground data-[state=active]:border-primary! data-[state=active]:bg-transparent! data-[state=active]:text-foreground"
           >
             Project details
-          </Tabs.Trigger>
-          <Tabs.Trigger
+          </TabsTrigger>
+          <TabsTrigger
             value="community"
-            className="flex min-h-11 items-center justify-center rounded-t-md border-b-2 border-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-primary data-[state=active]:text-foreground"
+            className="h-full min-h-12 rounded-none border-0 border-b-2 border-transparent px-4 py-0 text-center text-muted-foreground data-[state=active]:border-primary! data-[state=active]:bg-transparent! data-[state=active]:text-foreground"
           >
             Community posts
             {postsState === "ready" && (
-              <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[0.65rem] tabular-nums">
+              <Badge variant="secondary" className="ml-1 tabular-nums">
                 {posts.length}
-              </span>
+              </Badge>
             )}
-          </Tabs.Trigger>
-        </Tabs.List>
+          </TabsTrigger>
+        </TabsList>
 
-        <Tabs.Content value="details" className="min-h-0 flex-1 overflow-y-auto outline-none">
-          <ProjectDetailContent
-            feature={feature}
-            detail={detail}
-            loading={loading}
-            error={error}
-            onRetry={onRetry}
-            isModerator={isModerator}
-            onGeometryReviewed={onGeometryReviewed}
-          />
-        </Tabs.Content>
+        <TabsContent value="details" className="min-h-0 flex-1 overflow-hidden">
+          <ScrollArea className="h-full min-h-0">
+            <ProjectDetailContent
+              feature={feature}
+              detail={detail}
+              loading={loading}
+              error={error}
+              onRetry={onRetry}
+              isModerator={isModerator}
+              onGeometryReviewed={onGeometryReviewed}
+            />
+          </ScrollArea>
+        </TabsContent>
 
-        <Tabs.Content
-          value="community"
-          className="min-h-0 flex-1 overflow-y-auto p-4 outline-none sm:p-5"
-        >
-          <div className="mb-4 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground">
-            These are resident discussions explicitly linked to this project. They are not official project updates or verified findings.
-          </div>
+        <TabsContent value="community" className="min-h-0 flex-1 overflow-hidden">
+          <ScrollArea className="h-full min-h-0">
+            <div className="p-4 sm:p-5">
+              <Alert className="mb-4 bg-muted/30">
+                <Info aria-hidden="true" />
+                <AlertTitle>Resident discussion</AlertTitle>
+                <AlertDescription>
+                  These posts are explicitly linked to this project. They are not official project updates or verified findings.
+                </AlertDescription>
+              </Alert>
 
-          {postsState === "loading" && (
-            <div className="space-y-3" aria-label="Loading project community posts">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <Skeleton key={index} className="h-32 w-full rounded-lg" />
-              ))}
-            </div>
-          )}
-
-          {postsState === "error" && (
-            <Alert variant="destructive">
-              <AlertCircle aria-hidden="true" />
-              <AlertTitle>Community posts unavailable</AlertTitle>
-              <AlertDescription className="space-y-3">
-                <p>{postsError}</p>
-                <Button type="button" size="sm" variant="outline" onClick={() => void loadPosts()}>
-                  <RefreshCw aria-hidden="true" /> Retry
+              <div className="mb-4 flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Use the full Community composer. You may keep, change, or remove this project link before publishing.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="shrink-0"
+                  disabled={!viewerReady || !source}
+                  onClick={() => runCommunityAction(() => setComposerOpen(true))}
+                >
+                  {!viewerReady
+                    ? "Checking sign-in…"
+                    : canInteract
+                      ? "Create post"
+                      : "Sign in to post"}
                 </Button>
-              </AlertDescription>
-            </Alert>
-          )}
+              </div>
 
-          {postsState === "ready" && posts.length === 0 && (
-            <div className="rounded-lg border border-dashed border-border px-5 py-12 text-center">
-              <p className="text-sm font-medium">No community posts for this project yet</p>
-              <p className="mt-1.5 text-sm text-muted-foreground">
-                Discussions appear here only when residents explicitly link them to this project.
-              </p>
-            </div>
-          )}
+              {publishMessage && (
+                <Alert className="mb-4" role="status" aria-live="polite">
+                  <CheckCircle2 aria-hidden="true" />
+                  <AlertTitle>Post published</AlertTitle>
+                  <AlertDescription>{publishMessage}</AlertDescription>
+                </Alert>
+              )}
 
-          {postsState === "ready" && posts.length > 0 && (
-            <div className="space-y-3" aria-label="Community posts linked to this project">
-              {posts.map((post) => (
-                <PostCard
-                  key={post.id}
-                  post={post}
-                  onVote={() => undefined}
-                  canInteract={false}
-                />
-              ))}
+              {interactionError && (
+                <Alert variant="destructive" className="mb-4" role="alert">
+                  <AlertCircle aria-hidden="true" />
+                  <AlertTitle>Community action failed</AlertTitle>
+                  <AlertDescription>{interactionError}</AlertDescription>
+                </Alert>
+              )}
+
+              {postsState === "loading" && (
+                <div className="space-y-3" aria-label="Loading project community posts">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Spinner aria-hidden="true" /> Loading community posts…
+                  </div>
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <Skeleton key={index} className="h-32 w-full rounded-lg" />
+                  ))}
+                </div>
+              )}
+
+              {postsState === "error" && (
+                <Alert variant="destructive">
+                  <AlertCircle aria-hidden="true" />
+                  <AlertTitle>Community posts unavailable</AlertTitle>
+                  <AlertDescription className="space-y-3">
+                    <p>{postsError}</p>
+                    <Button type="button" size="sm" variant="outline" onClick={() => void loadPosts()}>
+                      <RefreshCw aria-hidden="true" /> Retry
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {postsState === "ready" && posts.length === 0 && (
+                <Empty className="border border-dashed px-5 py-12">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <CircleHelp aria-hidden="true" />
+                    </EmptyMedia>
+                    <EmptyTitle className="text-base">No community posts for this project yet</EmptyTitle>
+                    <EmptyDescription>
+                      Discussions appear here only when residents explicitly link them to this project.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+
+              {postsState === "ready" && posts.length > 0 && (
+                <div className="space-y-3" aria-label="Community posts linked to this project">
+                  {posts.map((post) => (
+                    <PostCard
+                      key={post.id}
+                      post={post}
+                      onVote={(direction) => voteOnProjectPost(post.id, direction)}
+                      canInteract={canInteract}
+                      votePending={pendingVoteIds.has(post.id)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </Tabs.Content>
-      </Tabs.Root>
-    </MapDialog>
+          </ScrollArea>
+        </TabsContent>
+      </Tabs>
+      </MapDialog>
+
+      <CreatePostModal
+        open={composerOpen}
+        onOpenChange={setComposerOpen}
+        onSubmit={createProjectPost}
+        defaultProject={selectedProject}
+        portalLayer="above-map"
+      />
+    </>
   )
 }
 
@@ -890,26 +1202,30 @@ const AREA_INTERACTIVE_LAYER_IDS = [
   "project-area-official",
   "project-area-official-fill",
   "project-area-reviewed",
+  "project-area-automatic-fill",
+  "project-area-automatic",
   "project-area-estimated-fill",
   "project-area-estimated-outline",
 ]
 
 function OfficialProjectMap({
-  mapStyle,
+  mapProvider,
   response,
   selectedId,
   camera,
   onSelect,
   onViewportSettled,
+  onProviderReady,
   onProviderFailure,
   mapRef,
 }: {
-  mapStyle: ReturnType<typeof getMapStyle>
+  mapProvider: MapProvider
   response: ViewportResponse
   selectedId: string | null
   camera: CameraState
   onSelect: (feature: ViewportFeature) => void
   onViewportSettled: (bounds: ViewportBounds, camera: CameraState) => void
+  onProviderReady: () => void
   onProviderFailure: () => void
   mapRef: React.RefObject<MapRef | null>
 }) {
@@ -972,22 +1288,23 @@ function OfficialProjectMap({
     "match",
     ["get", "displayStatus"],
     "ongoing",
-    "#f59e0b",
+    MAP_STATUS_COLORS.ongoing,
     "completed",
-    "#22c55e",
+    MAP_STATUS_COLORS.completed,
     "planned",
-    "#6366f1",
-    "#64748b",
+    MAP_STATUS_COLORS.planned,
+    MAP_STATUS_COLORS.unknown,
   ]
 
   return (
     <>
       <MapLibre
         ref={mapRef}
-        initialViewState={camera}
+        initialViewState={{ ...camera, pitch: mapPitchForZoom(camera.zoom) }}
         minZoom={7}
         maxZoom={20}
-        mapStyle={mapStyle}
+        maxPitch={60}
+        mapStyle={mapProvider.style}
         interactiveLayerIds={[
           "project-clusters",
           "projects-unclustered",
@@ -996,7 +1313,8 @@ function OfficialProjectMap({
         onClick={handleClick}
         onMouseEnter={(event) => { event.target.getCanvas().style.cursor = "pointer" }}
         onMouseLeave={(event) => { event.target.getCanvas().style.cursor = "" }}
-        onLoad={(event) =>
+        onLoad={(event) => {
+          onProviderReady()
           onViewportSettled(
             boundsFromMap(event.target),
             {
@@ -1005,8 +1323,14 @@ function OfficialProjectMap({
               zoom: event.target.getZoom(),
             },
           )
-        }
-        onMoveEnd={(event) =>
+        }}
+        onMoveEnd={(event) => {
+          const targetPitch = mapPitchForZoom(event.viewState.zoom)
+          if (Math.abs(event.target.getPitch() - targetPitch) > 0.5) {
+            const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            event.target.easeTo({ pitch: targetPitch, duration: reduceMotion ? 0 : 300 })
+            return
+          }
           onViewportSettled(
             boundsFromMap(event.target),
             {
@@ -1015,12 +1339,15 @@ function OfficialProjectMap({
               zoom: event.viewState.zoom,
             },
           )
-        }
+        }}
         onError={onProviderFailure}
         attributionControl={{ compact: true }}
         reuseMaps
       >
-        <NavigationControl position="bottom-right" showCompass={false} />
+        <NavigationControl position="bottom-right" showCompass />
+        {mapProvider.id === "openfreemap" && (
+          <Layer {...OPENFREEMAP_BUILDING_LAYER} />
+        )}
         <Source
           id="official-projects"
           type="geojson"
@@ -1035,7 +1362,7 @@ function OfficialProjectMap({
             maxzoom={15}
             filter={["has", "point_count"]}
             paint={{
-              "circle-color": "#475569",
+              "circle-color": PROJECT_INDICATOR_DARK,
               "circle-radius": ["step", ["get", "point_count"], 18, 25, 22, 100, 28],
               "circle-stroke-width": 2,
               "circle-stroke-color": "#ffffff",
@@ -1058,7 +1385,7 @@ function OfficialProjectMap({
             maxzoom={15}
             filter={["!", ["has", "point_count"]]}
             paint={{
-              "circle-color": statusColor,
+              "circle-color": PROJECT_INDICATOR_COLOR,
               "circle-radius": 7,
               "circle-stroke-width": 2,
               "circle-stroke-color": "#ffffff",
@@ -1085,7 +1412,18 @@ function OfficialProjectMap({
             type="fill"
             minzoom={15}
             filter={["all", ["==", ["get", "geometryKind"], "estimated"], ["==", ["geometry-type"], "Polygon"]]}
-            paint={{ "fill-color": statusColor, "fill-opacity": 0.2 }}
+            paint={{ "fill-color": PROJECT_INDICATOR_COLOR, "fill-opacity": 0.34 }}
+          />
+          <Layer
+            id="project-area-estimated-casing"
+            type="line"
+            minzoom={15}
+            filter={["==", ["get", "geometryKind"], "estimated"]}
+            paint={{
+              "line-color": "#ffffff",
+              "line-width": 6,
+              "line-opacity": 0.9,
+            }}
           />
           <Layer
             id="project-area-estimated-outline"
@@ -1093,10 +1431,29 @@ function OfficialProjectMap({
             minzoom={15}
             filter={["==", ["get", "geometryKind"], "estimated"]}
             paint={{
-              "line-color": statusColor,
-              "line-width": 2.5,
-              "line-opacity": 0.95,
+              "line-color": PROJECT_INDICATOR_COLOR,
+              "line-width": 3,
+              "line-opacity": 1,
               "line-dasharray": [2, 2],
+            }}
+          />
+          <Layer
+            id="project-area-automatic-fill"
+            type="fill"
+            minzoom={15}
+            filter={["all", ["==", ["get", "geometryKind"], "automatic_estimate"], ["==", ["geometry-type"], "Polygon"]]}
+            paint={{ "fill-color": statusColor, "fill-opacity": 0.25 }}
+          />
+          <Layer
+            id="project-area-automatic"
+            type="line"
+            minzoom={15}
+            filter={["==", ["get", "geometryKind"], "automatic_estimate"]}
+            paint={{
+              "line-color": statusColor,
+              "line-width": ["match", ["geometry-type"], "LineString", 8, 3],
+              "line-opacity": 0.95,
+              "line-dasharray": [1, 1],
             }}
           />
           <Layer
@@ -1170,7 +1527,7 @@ function OfficialProjectMap({
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span className="capitalize">{feature.category}</span>
-                  <GeometryBadge kind={feature.geometryKind} />
+                  <GeometryBadge kind={feature.geometryKind} method={feature.geometryEstimateMethod} />
                 </div>
               </button>
             </li>
@@ -1198,7 +1555,7 @@ export function ProjectMapSurface() {
     "loading" | "refreshing" | "ready" | "configuration"
   >("loading")
   const [queryError, setQueryError] = useState<string | null>(null)
-  const [styleFailure, setStyleFailure] = useState(false)
+  const [providerIndex, setProviderIndex] = useState(0)
   const [detail, setDetail] = useState<ProjectDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
@@ -1209,9 +1566,13 @@ export function ProjectMapSurface() {
   const requestRef = useRef(0)
   const detailRequestRef = useRef(0)
   const viewportTimerRef = useRef<number | null>(null)
+  const providerFailureTimerRef = useRef<number | null>(null)
   const hasResponseRef = useRef(false)
   const lastBoundsRef = useRef(DEFAULT_BOUNDS)
-  const mapStyle = useMemo(() => getMapStyle(), [])
+  const failedProvidersRef = useRef(new Set<string>())
+  const readyProvidersRef = useRef(new Set<string>())
+  const providers = useMemo(() => getMapProviders(), [])
+  const mapProvider = providers[providerIndex] ?? null
 
   const loadViewport = useCallback(async (bounds: ViewportBounds) => {
     const requestId = ++requestRef.current
@@ -1260,6 +1621,9 @@ export function ProjectMapSurface() {
     () => () => {
       if (viewportTimerRef.current !== null) {
         window.clearTimeout(viewportTimerRef.current)
+      }
+      if (providerFailureTimerRef.current !== null) {
+        window.clearTimeout(providerFailureTimerRef.current)
       }
     },
     [],
@@ -1315,6 +1679,7 @@ export function ProjectMapSurface() {
         mapRef.current?.flyTo({
           center: [nextState.camera.longitude, nextState.camera.latitude],
           zoom: nextState.camera.zoom,
+          pitch: mapPitchForZoom(nextState.camera.zoom),
         })
       }
     }
@@ -1328,7 +1693,12 @@ export function ProjectMapSurface() {
     setListOpen(false)
     const search = writeProjectSearch(window.location.search, feature.id)
     window.history.pushState({ projectId: feature.id }, "", `${window.location.pathname}?${search}`)
-    mapRef.current?.flyTo({ center: feature.coordinates, zoom: Math.max(camera.zoom, 15) })
+    const targetZoom = Math.max(camera.zoom, 15)
+    mapRef.current?.flyTo({
+      center: feature.coordinates,
+      zoom: targetZoom,
+      pitch: mapPitchForZoom(targetZoom),
+    })
   }, [camera.zoom])
 
   const closeProject = useCallback(() => {
@@ -1353,7 +1723,38 @@ export function ProjectMapSurface() {
     [loadViewport],
   )
 
-  const mapUnavailable = styleFailure
+  const handleProviderReady = useCallback(() => {
+    if (!mapProvider) return
+    readyProvidersRef.current.add(mapProvider.id)
+    if (providerFailureTimerRef.current !== null) {
+      window.clearTimeout(providerFailureTimerRef.current)
+      providerFailureTimerRef.current = null
+    }
+  }, [mapProvider])
+
+  const handleProviderFailure = useCallback(() => {
+    if (!mapProvider || !shouldScheduleMapProviderFallback(
+      readyProvidersRef.current.has(mapProvider.id),
+      failedProvidersRef.current.has(mapProvider.id),
+      providerFailureTimerRef.current !== null,
+    )) return
+
+    providerFailureTimerRef.current = window.setTimeout(() => {
+      failedProvidersRef.current.add(mapProvider.id)
+      providerFailureTimerRef.current = null
+      setProviderIndex((current) => nextMapProviderIndex(current, providers.length))
+    }, 1_500)
+  }, [mapProvider, providers.length])
+
+  const retryProviders = useCallback(() => {
+    if (providerFailureTimerRef.current !== null) {
+      window.clearTimeout(providerFailureTimerRef.current)
+      providerFailureTimerRef.current = null
+    }
+    failedProvidersRef.current.clear()
+    readyProvidersRef.current.clear()
+    setProviderIndex(0)
+  }, [])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:p-4">
@@ -1370,7 +1771,7 @@ export function ProjectMapSurface() {
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
-          {queryState === "refreshing" && <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />}
+          {(queryState === "loading" || queryState === "refreshing") && <Spinner aria-hidden="true" />}
           {queryState === "loading"
             ? "Loading visible projects…"
             : queryState === "refreshing"
@@ -1383,67 +1784,70 @@ export function ProjectMapSurface() {
 
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,25rem)]">
         <section className="relative min-h-[34rem] overflow-hidden rounded-xl border bg-muted/30 lg:min-h-0" aria-label="Official project map">
-          {!styleFailure ? (
+          {mapProvider ? (
             <OfficialProjectMap
-              mapStyle={mapStyle}
+              key={mapProvider.id}
+              mapProvider={mapProvider}
               response={response}
               selectedId={selectedId}
               camera={camera}
               onSelect={selectProject}
               onViewportSettled={onViewportSettled}
-              onProviderFailure={() => {
-                setStyleFailure(true)
-              }}
+              onProviderReady={handleProviderReady}
+              onProviderFailure={handleProviderFailure}
               mapRef={mapRef}
             />
           ) : (
             <MapStatePanel
-              title="Satellite map unavailable"
-              description="The configured satellite imagery could not be loaded. Project records remain available in the list."
+              title="Map providers unavailable"
+              description="OpenFreeMap and the configured fallbacks could not be loaded. Project records remain available in the list."
               action={
-                <Button variant="outline" size="sm" onClick={() => setStyleFailure(false)}>
-                  <RefreshCw aria-hidden="true" /> Retry satellite map
+                <Button variant="outline" size="sm" onClick={retryProviders}>
+                  <RefreshCw aria-hidden="true" /> Retry map providers
                 </Button>
               }
             />
           )}
-          {response.features.length === 0 && !queryError && queryState === "ready" && !mapUnavailable && (
-            <MapStatePanel
-              title="No official projects in this view"
-              description="Pan or zoom the map to browse another area."
-            />
-          )}
           {response.truncated && (
-            <div className="absolute left-3 right-3 top-3 z-10 rounded-lg border border-amber-300 bg-amber-50/95 px-3 py-2 text-xs text-amber-950 shadow-sm backdrop-blur-sm">
+            <div className="absolute left-3 right-3 top-3 z-10 rounded-lg border border-primary/30 bg-background/95 px-3 py-2 text-xs text-foreground shadow-sm backdrop-blur-sm">
               Results are incomplete. Zoom in to see more projects; cluster counts show returned records only.
             </div>
           )}
-          <div className="absolute bottom-3 left-3 z-10 max-w-[15rem] rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur-sm md:max-w-xs">
-            <div className="mb-2 text-xs font-medium">Project map legend</div>
-            <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-              {(Object.keys(STATUS_LABELS) as DisplayStatus[]).map((status) => (
-                <div key={status} className="flex items-center gap-1.5">
-                  <span className={`size-2.5 rounded-full ${STATUS_DOT_CLASSES[status]}`} aria-hidden="true" />
-                  <span>{statusLabel(status)}</span>
+          <Card
+            size="sm"
+            className="absolute bottom-3 left-3 z-10 max-w-[15rem] gap-0 rounded-xl bg-background/95 py-0 shadow-sm backdrop-blur-sm md:max-w-xs"
+          >
+            <CardHeader className="px-3 pb-2 pt-3">
+              <CardTitle className="text-xs">Project map legend</CardTitle>
+            </CardHeader>
+            <CardContent className="px-3 pb-3">
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                <span className="size-3 rounded-full border-2 border-white bg-red-600 ring-1 ring-red-900" aria-hidden="true" />
+                <span>Project location marker</span>
+              </div>
+              <div className="space-y-1 border-t pt-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-7 rounded-sm border-2 border-primary bg-primary/25" aria-hidden="true" />
+                  <span>Official project geometry</span>
                 </div>
-              ))}
-            </div>
-            <div className="space-y-1 border-t pt-2 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-7 rounded-sm border-2 border-sky-600 bg-sky-400/40" aria-hidden="true" />
-                <span>Official project geometry</span>
+                <div className="flex items-center gap-2">
+                  <span className="w-7 border-t-[3px] border-dashed border-secondary-foreground" aria-hidden="true" />
+                  <span>Reviewed OSM estimate</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-7 border-t-[3px] border-dotted border-primary/70" aria-hidden="true" />
+                  <span>Estimated project route/building</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="size-3 rounded-full border-2 border-white bg-red-600 ring-1 ring-red-900" aria-hidden="true" />
+                  <span>Fallback circle · 50 m radius</span>
+                </div>
+                <p className="pt-1 text-muted-foreground">
+                  {mapProvider ? `${mapProvider.name} · ` : ""}3D view begins at zoom 15.
+                </p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="w-7 border-t-[3px] border-dashed border-amber-600" aria-hidden="true" />
-                <span>Reviewed OSM estimate</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-7 rounded-sm border-2 border-dashed border-slate-600 bg-slate-300/40" aria-hidden="true" />
-                <span>Estimated 50 m project area</span>
-              </div>
-              <p className="pt-1 text-muted-foreground">Zoom to 15+ to see highlighted areas.</p>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </section>
 
         <aside className="hidden min-h-0 flex-col gap-3 lg:flex">
@@ -1460,38 +1864,45 @@ export function ProjectMapSurface() {
         </aside>
       </div>
 
-      <div className="flex items-center justify-between gap-2 lg:hidden">
-        <Button variant="outline" onClick={() => setListOpen(true)}>
-          <Search aria-hidden="true" /> Projects in this view
-          <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs">{response.features.length}</span>
-        </Button>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <LocateFixed aria-hidden="true" /> Cebu City view
-        </div>
+      <div className="lg:hidden">
+        <ButtonGroup className="max-w-full">
+          <Button variant="outline" onClick={() => setListOpen(true)}>
+            <Search aria-hidden="true" /> Projects in this view
+            <Badge variant="secondary" className="ml-1 tabular-nums">
+              {response.features.length}
+            </Badge>
+          </Button>
+          <ButtonGroupText className="shrink text-xs text-muted-foreground">
+            <LocateFixed aria-hidden="true" />
+            <span className="hidden sm:inline">Cebu City view</span>
+            <span className="sm:hidden">Cebu</span>
+          </ButtonGroupText>
+        </ButtonGroup>
       </div>
 
-      <Sheet open={listOpen} onOpenChange={setListOpen}>
-        <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-2xl p-0">
-          <SheetHeader className="border-b">
-            <SheetTitle>Projects in this view</SheetTitle>
-            <SheetDescription>
+      <Drawer open={listOpen} onOpenChange={setListOpen}>
+        <DrawerContent className="dark h-[82dvh] max-h-[82dvh]">
+          <DrawerHeader className="shrink-0 border-b px-2 pb-3 pt-2 text-left">
+            <DrawerTitle>Projects in this view</DrawerTitle>
+            <DrawerDescription>
               Select an official record from the current map area.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex min-h-0 h-[55dvh] p-3">
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="flex min-h-0 flex-1 px-2 pb-2 pt-3">
             <ProjectList
               features={response.features}
               selectedId={selectedId}
-            loading={queryState === "loading" || queryState === "refreshing"}
+              loading={queryState === "loading" || queryState === "refreshing"}
               truncated={response.truncated}
               onSelect={selectProject}
-            onRetry={() => void loadViewport(lastBoundsRef.current)}
-            queryError={queryError}
-            configurationRequired={queryState === "configuration"}
+              onRetry={() => void loadViewport(lastBoundsRef.current)}
+              queryError={queryError}
+              configurationRequired={queryState === "configuration"}
+              showHeader={false}
             />
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
       <ProjectDetailDialog
         key={selectedId ?? "closed-project"}
         selectedId={selectedId}

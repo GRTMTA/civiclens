@@ -15,3 +15,14 @@ export { LOGIN_PATH }
 export function requestSignIn(): void {
   window.location.assign(LOGIN_PATH)
 }
+
+export type CommunityActionDecision = "allow" | "sign-in" | "wait"
+
+/** Prevents a signed-in resident from being redirected while viewer state is loading. */
+export function communityActionDecision(
+  canInteract: boolean,
+  viewerReady: boolean,
+): CommunityActionDecision {
+  if (canInteract) return "allow"
+  return viewerReady ? "sign-in" : "wait"
+}

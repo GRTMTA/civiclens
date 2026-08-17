@@ -2,13 +2,19 @@ import { describe, expect, it } from "vitest"
 import {
   fetchProjectDetail,
   fetchViewportProjects,
+  getMapProviders,
   getMapStyle,
   isCurrentUserModerator,
   isMapConfigurationError,
+  mapPitchForZoom,
   MapConfigurationError,
+  nextMapProviderIndex,
+  OPENFREEMAP_3D_STYLE,
+  OPENFREEMAP_BUILDING_LAYER,
   SATELLITE_ATTRIBUTION,
   SATELLITE_STYLE,
   saveReviewedOsmEstimate,
+  shouldScheduleMapProviderFallback,
 } from "./public-projects"
 
 describe("public project data seam", () => {
@@ -20,15 +26,33 @@ describe("public project data seam", () => {
     expect(result).toBeNull()
   })
 
-  it("uses the no-key attributed satellite style unless an override is set", () => {
-    expect(getMapStyle("", "")).toBe(SATELLITE_STYLE)
-    expect(getMapStyle("   ", "   ")).toBe(SATELLITE_STYLE)
-    expect(getMapStyle("", "free-key")).toBe(
-      "https://api.maptiler.com/maps/hybrid/style.json?key=free-key",
-    )
+  it("uses OpenFreeMap first and retains configured MapTiler and EOX fallbacks", () => {
+    expect(getMapStyle("", "")).toBe(OPENFREEMAP_3D_STYLE)
+    expect(getMapStyle("   ", "   ")).toBe(OPENFREEMAP_3D_STYLE)
     expect(getMapStyle("https://maps.example/style.json", "free-key")).toBe(
       "https://maps.example/style.json",
     )
+
+    expect(getMapProviders("", "free-key").map((provider) => provider.id)).toEqual([
+      "openfreemap",
+      "maptiler",
+      "eox",
+    ])
+    expect(getMapProviders("https://maps.example/style.json", "free-key").map((provider) => provider.id)).toEqual([
+      "override",
+      "openfreemap",
+      "maptiler",
+      "eox",
+    ])
+    expect(getMapProviders("", "free-key")[1].style).toBe(
+      "https://api.maptiler.com/maps/hybrid/style.json?key=free-key",
+    )
+    expect(OPENFREEMAP_BUILDING_LAYER).toMatchObject({
+      type: "fill-extrusion",
+      source: "openmaptiles",
+      "source-layer": "building",
+      minzoom: 15,
+    })
 
     const satelliteSource = SATELLITE_STYLE.sources.satellite
     expect(satelliteSource).toMatchObject({
@@ -38,6 +62,19 @@ describe("public project data seam", () => {
     })
     expect(SATELLITE_ATTRIBUTION).toContain("Sentinel-2 cloudless")
     expect(SATELLITE_ATTRIBUTION).toContain("EOX IT Services GmbH")
+  })
+
+  it("keeps overview cameras flat, pitches project zooms, and bounds fallback advancement", () => {
+    expect(mapPitchForZoom(14.99)).toBe(0)
+    expect(mapPitchForZoom(15)).toBe(55)
+    expect(mapPitchForZoom(20)).toBe(55)
+    expect(nextMapProviderIndex(0, 3)).toBe(1)
+    expect(nextMapProviderIndex(2, 3)).toBe(3)
+    expect(nextMapProviderIndex(3, 3)).toBe(3)
+    expect(shouldScheduleMapProviderFallback(false, false, false)).toBe(true)
+    expect(shouldScheduleMapProviderFallback(true, false, false)).toBe(false)
+    expect(shouldScheduleMapProviderFallback(false, true, false)).toBe(false)
+    expect(shouldScheduleMapProviderFallback(false, false, true)).toBe(false)
   })
 
   it("passes only bounded viewport arguments to the public query", async () => {

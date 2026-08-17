@@ -68,9 +68,12 @@ export function isCommunityAuthRequiredError(
  * a partial success rather than inviting the resident to write it again.
  */
 export class CommunityMediaError extends Error {
-  constructor(message: string) {
+  readonly publishedPost: CommunityPost | null
+
+  constructor(message: string, publishedPost: CommunityPost | null = null) {
     super(message)
     this.name = "CommunityMediaError"
+    this.publishedPost = publishedPost
   }
 }
 
@@ -115,7 +118,7 @@ export type Viewer = {
 }
 
 // ── Storage ──────────────────────────────────────────────────────────────────
-// Bucket ids match `20260816000000_community_profiles_and_media.sql`. These
+// Bucket ids match `20260816000000_community_profiles_and_project_geometry.sql`. These
 // buckets are public so guests can see the photos in discussion they browse;
 // write access is owner-only through storage policies.
 
@@ -334,16 +337,37 @@ export function isCommunitySchemaMissingError(
   return error instanceof CommunitySchemaMissingError
 }
 
+class CommunityRpcUnavailableError extends CommunitySchemaMissingError {
+  constructor(readonly rpcName: string) {
+    super()
+    this.name = "CommunityRpcUnavailableError"
+  }
+}
+
+function isCommunityRpcUnavailable(error: unknown, rpcName: string): boolean {
+  return error instanceof CommunityRpcUnavailableError && error.rpcName === rpcName
+}
+
 /** Turns a Postgres error into something worth showing a resident. */
-function toFriendlyError(message: string): Error {
+function toFriendlyError(message: string, rpcName?: string, code?: string): Error {
   if (message.includes("community_rate_limit_exceeded")) {
     return new Error("You have reached the posting limit. Please try again later.")
   }
   if (message.includes("authentication required") || message.includes("permission denied")) {
     return new CommunityAuthRequiredError()
   }
-  // PostgREST reports an unmigrated database as a missing function/relation.
-  // Surfacing the raw message would read as a bug rather than pending setup.
+  const escapedRpcName = rpcName?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const namesRequestedRpc = escapedRpcName
+    ? new RegExp(`(?:^|\\.)${escapedRpcName}(?:\\s*\\(|\\b)`).test(message)
+    : false
+  if (
+    code === "PGRST202" &&
+    message.includes("Could not find the function") &&
+    namesRequestedRpc
+  ) {
+    return new CommunityRpcUnavailableError(rpcName!)
+  }
+  // PostgREST reports a genuinely absent relation/schema as a setup error.
   if (
     message.includes("Could not find the function") ||
     message.includes("Could not find the table") ||
@@ -362,8 +386,41 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
 
   async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
     const { data, error } = await client.rpc(name, args)
-    if (error) throw toFriendlyError(error.message || `Unable to complete ${name}.`)
+    if (error) {
+      throw toFriendlyError(
+        error.message || `Unable to complete ${name}.`,
+        name,
+        error.code,
+      )
+    }
     return data
+  }
+
+  const parsePosts = (data: unknown): CommunityPost[] =>
+    Array.isArray(data) ? data.flatMap((row) => parsePost(row, publicUrl) ?? []) : []
+
+  /**
+   * Compatibility for databases that already have the original Community
+   * discussion migration but not the later profile/media/project-feed upgrade.
+   * The original feed can return up to 100 existing rows; filters introduced
+   * later are applied locally without bypassing its RLS-protected read API.
+   */
+  async function listLegacyPosts(query: FeedQuery): Promise<CommunityPost[]> {
+    const data = await rpc("community_feed", {
+      p_sort: query.sort,
+      p_topic: query.topic,
+      p_search: query.search.trim() || null,
+      p_limit: 100,
+      p_offset: 0,
+    })
+    const author = query.author?.trim().toLowerCase() ?? ""
+    return parsePosts(data).filter((post) =>
+      (!query.projectId || post.project?.id === query.projectId) &&
+      (!query.kind || post.kind === query.kind) &&
+      (!author ||
+        post.author.username?.toLowerCase() === author ||
+        post.authorName.toLowerCase() === author),
+    )
   }
 
   /** Fails fast for actions the RPC grants would reject anyway. */
@@ -409,26 +466,40 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
 
   return {
     async listPosts(query) {
-      const data = await rpc("community_feed", {
-        p_sort: query.sort,
-        p_topic: query.topic,
-        p_search: query.search.trim() || null,
-        p_project_id: query.projectId,
-        p_kind: query.kind,
-        p_author: query.author,
-      })
-      return Array.isArray(data) ? data.flatMap((row) => parsePost(row, publicUrl) ?? []) : []
+      try {
+        const data = await rpc("community_feed", {
+          p_sort: query.sort,
+          p_topic: query.topic,
+          p_search: query.search.trim() || null,
+          p_project_id: query.projectId,
+          p_kind: query.kind,
+          p_author: query.author,
+        })
+        return parsePosts(data)
+      } catch (cause) {
+        if (!isCommunityRpcUnavailable(cause, "community_feed")) throw cause
+        try {
+          return await listLegacyPosts(query)
+        } catch (legacyCause) {
+          if (isCommunityRpcUnavailable(legacyCause, "community_feed")) {
+            throw new CommunitySchemaMissingError()
+          }
+          throw legacyCause
+        }
+      }
     },
 
     async listPostsForProject(projectId) {
       const cleanProjectId = projectId.trim()
       if (!cleanProjectId) throw new Error("A project ID is required to load discussions.")
-      const data = await rpc("community_posts_for_project", {
-        p_project_id: cleanProjectId,
-        p_limit: 50,
-        p_offset: 0,
+      return this.listPosts({
+        sort: "popular",
+        search: "",
+        topic: null,
+        projectId: cleanProjectId,
+        kind: null,
+        author: null,
       })
-      return Array.isArray(data) ? data.flatMap((row) => parsePost(row, publicUrl) ?? []) : []
     },
 
     async getPost(postId) {
@@ -445,8 +516,9 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
 
     async createPost(input) {
       await requireViewer()
-      const created = parsePost(
-        await rpc("create_community_post", {
+      let createdValue: unknown
+      try {
+        createdValue = await rpc("create_community_post", {
           p_title: input.title.trim(),
           p_body: input.body.trim(),
           p_topic: input.topic,
@@ -454,28 +526,65 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
           p_kind: input.kind,
           // Area is meaningful only for an observation.
           p_area_label: input.kind === "observation" ? input.areaLabel?.trim() || null : null,
-        }),
-        publicUrl,
-      )
+        })
+      } catch (cause) {
+        if (!isCommunityRpcUnavailable(cause, "create_community_post")) throw cause
+        try {
+          createdValue = await rpc("create_community_post", {
+            p_title: input.title.trim(),
+            p_body: input.body.trim(),
+            p_topic: input.topic,
+            p_project_id: input.projectId,
+          })
+        } catch (legacyCause) {
+          if (isCommunityRpcUnavailable(legacyCause, "create_community_post")) {
+            throw new CommunitySchemaMissingError()
+          }
+          throw legacyCause
+        }
+      }
+      const created = parsePost(createdValue, publicUrl)
       if (!created) throw new Error("Your post was saved but could not be displayed.")
 
-      const { failed } = await uploadMedia(
-        POST_MEDIA_BUCKET,
-        created.id,
-        input.photos,
-        "attach_community_post_media",
-        "p_post_id",
-      )
-      if (failed > 0) {
+      try {
+        const { failed } = await uploadMedia(
+          POST_MEDIA_BUCKET,
+          created.id,
+          input.photos,
+          "attach_community_post_media",
+          "p_post_id",
+        )
+        if (failed > 0) {
+          throw new CommunityMediaError(
+            failed === input.photos.length
+              ? "Your post was published, but the photos could not be uploaded."
+              : `Your post was published, but ${failed} photo(s) could not be uploaded.`,
+            created,
+          )
+        }
+
+        // Re-read so the returned post carries the media rows just registered.
+        const refreshed = await this.getPost(created.id)
+        if (!refreshed) {
+          throw new CommunityMediaError(
+            "Your post was published, but its final details could not be loaded. Refresh to see it.",
+            created,
+          )
+        }
+        return refreshed
+      } catch (cause) {
+        if (isCommunityMediaError(cause)) {
+          throw cause.publishedPost
+            ? cause
+            : new CommunityMediaError(cause.message, created)
+        }
         throw new CommunityMediaError(
-          failed === input.photos.length
-            ? "Your post was published, but the photos could not be uploaded."
-            : `Your post was published, but ${failed} photo(s) could not be uploaded.`,
+          input.photos.length > 0
+            ? "Your post was published, but its photos could not be fully saved."
+            : "Your post was published, but its final details could not be loaded. Refresh to see it.",
+          created,
         )
       }
-
-      // Re-read so the returned post carries the media rows just registered.
-      return (await this.getPost(created.id)) ?? created
     },
 
     async createComment(input) {

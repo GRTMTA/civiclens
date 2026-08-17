@@ -17,6 +17,7 @@ export function VoteControl({
   orientation = "vertical",
   size = "default",
   canInteract = true,
+  pending = false,
 }: {
   score: number
   vote: VoteState
@@ -27,18 +28,23 @@ export function VoteControl({
   size?: "default" | "sm"
   /** False for guests: the controls explain themselves instead of failing. */
   canInteract?: boolean
+  /** True while this post's vote RPC is settling; prevents overlapping toggles. */
+  pending?: boolean
 }) {
   const vertical = orientation === "vertical"
   const iconSize = size === "sm" ? "size-4" : "size-[1.15rem]"
   const buttonSize = size === "sm" ? "size-6" : "size-7"
 
   const buttonBase = cn(
-    "inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 outline-none hover:bg-elevated hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
+    "inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 outline-none hover:bg-elevated hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-wait disabled:opacity-60 disabled:hover:bg-transparent",
     buttonSize,
   )
+  const pendingLabel = `Saving vote: ${label}`
+  const buttonTitle = pending ? "Saving vote…" : canInteract ? undefined : "Sign in to vote"
 
   return (
     <div
+      aria-busy={pending || undefined}
       className={cn(
         "flex items-center",
         vertical ? "flex-col gap-0.5" : "gap-1",
@@ -46,9 +52,10 @@ export function VoteControl({
     >
       <button
         type="button"
+        disabled={pending}
         aria-pressed={vote === 1}
-        aria-label={canInteract ? `Upvote: ${label}` : `Sign in to upvote: ${label}`}
-        title={canInteract ? undefined : "Sign in to vote"}
+        aria-label={pending ? pendingLabel : canInteract ? `Upvote: ${label}` : `Sign in to upvote: ${label}`}
+        title={buttonTitle}
         onClick={() => onVote(1)}
         className={cn(buttonBase, vote === 1 && "text-primary hover:text-primary")}
       >
@@ -72,9 +79,10 @@ export function VoteControl({
       </span>
       <button
         type="button"
+        disabled={pending}
         aria-pressed={vote === -1}
-        aria-label={canInteract ? `Downvote: ${label}` : `Sign in to downvote: ${label}`}
-        title={canInteract ? undefined : "Sign in to vote"}
+        aria-label={pending ? pendingLabel : canInteract ? `Downvote: ${label}` : `Sign in to downvote: ${label}`}
+        title={buttonTitle}
         onClick={() => onVote(-1)}
         className={cn(buttonBase, vote === -1 && "text-destructive hover:text-destructive")}
       >

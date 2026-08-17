@@ -20,10 +20,12 @@ export function PostCard({
   post,
   onVote,
   canInteract = true,
+  votePending = false,
 }: {
   post: CommunityPost
   onVote: (direction: 1 | -1) => void
   canInteract?: boolean
+  votePending?: boolean
 }) {
   const href = postPath(post.id)
   const authorHref = post.author.username ? profilePath(post.author.username) : null
@@ -102,6 +104,7 @@ export function PostCard({
             orientation="horizontal"
             size="sm"
             canInteract={canInteract}
+            pending={votePending}
           />
           <PostActions
             postId={post.id}

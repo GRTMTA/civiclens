@@ -21,6 +21,10 @@ import {
 } from "./community-contract"
 import { getCommunitySource } from "./community-data"
 import { MediaPreviewList } from "./media-gallery"
+import {
+  initialProjectSelection,
+  projectOptionsWithSelection,
+} from "./project-selection"
 import { TOPIC_ICONS } from "./topic-chip"
 
 const fieldLabelClass = "text-xs font-medium tracking-[0.04em] text-muted-foreground uppercase"
@@ -56,12 +60,18 @@ export function CreatePostModal({
   onOpenChange,
   onSubmit,
   defaultProjectId = null,
+  defaultProject = null,
+  portalLayer = "default",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSubmit: (input: NewPostInput) => Promise<unknown>
-  /** Pre-selects a project, e.g. when posting from a project context. */
+  /** Backward-compatible ID-only preselection. Prefer defaultProject when its name is known. */
   defaultProjectId?: string | null
+  /** Display-safe project context supplied by a map or scoped Community view. */
+  defaultProject?: ProjectReference | null
+  /** Raises this portal above the selected-project map dialog. */
+  portalLayer?: "default" | "above-map"
 }) {
   const fieldId = useId()
   const titleId = `${fieldId}-title`
@@ -77,6 +87,7 @@ export function CreatePostModal({
   const [topic, setTopic] = useState<TopicId>("infrastructure")
   const [areaLabel, setAreaLabel] = useState("")
   const [relatedProjectId, setRelatedProjectId] = useState("")
+  const [selectedProject, setSelectedProject] = useState<ProjectReference | null>(null)
   const [projectSearch, setProjectSearch] = useState("")
   const [projects, setProjects] = useState<ProjectReference[]>([])
   const [projectsState, setProjectsState] = useState<"loading" | "ready" | "error">("loading")
@@ -84,22 +95,40 @@ export function CreatePostModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const photoInputRef = useRef<HTMLInputElement>(null)
+  const wasOpenRef = useRef(false)
+  const submissionIdRef = useRef(0)
+  const submissionPendingRef = useRef(false)
 
   const topics = useMemo(() => listTopics(), [])
+  const projectOptions = useMemo(
+    () => projectOptionsWithSelection(projects, selectedProject),
+    [projects, selectedProject],
+  )
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      wasOpenRef.current = false
+      return
+    }
+    if (wasOpenRef.current) return
+    wasOpenRef.current = true
+    if (submissionPendingRef.current) {
+      setSubmitting(true)
+      return
+    }
     setKind("discussion")
     setTitle("")
     setBody("")
     setTopic("infrastructure")
     setAreaLabel("")
-    setRelatedProjectId(defaultProjectId ?? "")
+    const initialProject = initialProjectSelection(defaultProject, defaultProjectId)
+    setRelatedProjectId(initialProject?.id ?? "")
+    setSelectedProject(initialProject)
     setProjectSearch("")
     setPhotos([])
     setError(null)
     setSubmitting(false)
-  }, [defaultProjectId, open])
+  }, [defaultProject?.id, defaultProject?.name, defaultProjectId, open])
 
   // Project options are searched server-side so a large dataset is not fetched
   // in full. A failure here must not block posting: the link is optional, so the
@@ -115,6 +144,10 @@ export function CreatePostModal({
           .then((next) => {
             if (cancelled) return
             setProjects(next)
+            setSelectedProject((current) => {
+              if (!current || current.name !== current.id) return current
+              return next.find((project) => project.id === current.id) ?? current
+            })
             setProjectsState("ready")
           })
           .catch(() => {
@@ -160,6 +193,7 @@ export function CreatePostModal({
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (submissionPendingRef.current) return
     const input: NewPostInput = {
       kind,
       title,
@@ -178,29 +212,55 @@ export function CreatePostModal({
       return
     }
     setError(null)
+    const submissionId = ++submissionIdRef.current
+    submissionPendingRef.current = true
     setSubmitting(true)
     try {
       await onSubmit(input)
-      onOpenChange(false)
+      if (submissionId === submissionIdRef.current) onOpenChange(false)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Your post could not be published.")
+      if (submissionId === submissionIdRef.current) {
+        setError(cause instanceof Error ? cause.message : "Your post could not be published.")
+      }
     } finally {
-      setSubmitting(false)
+      if (submissionId === submissionIdRef.current) {
+        submissionPendingRef.current = false
+        setSubmitting(false)
+      }
     }
   }
 
+  const changeOpen = (nextOpen: boolean) => {
+    if (!nextOpen && submissionPendingRef.current) return
+    onOpenChange(nextOpen)
+  }
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={changeOpen}>
       <Dialog.Portal>
         {/*
           `dark` here, not on a parent: Radix portals to document.body, so the
           shell's `.dark` wrapper does not apply and the modal would otherwise
           render with the light palette.
         */}
-        <Dialog.Overlay className="dark fixed inset-0 z-50 bg-[oklch(0.1_0.02_256_/_0.72)] data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+        <Dialog.Overlay
+          className={cn(
+            "dark fixed inset-0 bg-[oklch(0.1_0.02_256_/_0.72)] data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+            portalLayer === "above-map" ? "z-[80]" : "z-50",
+          )}
+        />
         <Dialog.Content
           aria-describedby={`${fieldId}-description`}
-          className="dark fixed top-1/2 left-1/2 z-50 flex max-h-[92dvh] w-[calc(100%-1.5rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-2xl duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+          onEscapeKeyDown={(event) => {
+            if (submissionPendingRef.current) event.preventDefault()
+          }}
+          onPointerDownOutside={(event) => {
+            if (submissionPendingRef.current) event.preventDefault()
+          }}
+          className={cn(
+            "dark fixed top-1/2 left-1/2 flex max-h-[92dvh] w-[calc(100%-1.5rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-2xl duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            portalLayer === "above-map" ? "z-[81]" : "z-50",
+          )}
         >
           <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
             <div className="min-w-0">
@@ -216,7 +276,12 @@ export function CreatePostModal({
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Close composer">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Close composer"
+                disabled={submitting}
+              >
                 <X aria-hidden="true" />
               </Button>
             </Dialog.Close>
@@ -312,14 +377,20 @@ export function CreatePostModal({
                 <select
                   id={projectId}
                   value={relatedProjectId}
-                  onChange={(event) => setRelatedProjectId(event.target.value)}
+                  onChange={(event) => {
+                    const nextId = event.target.value
+                    setRelatedProjectId(nextId)
+                    setSelectedProject(
+                      projectOptions.find((project) => project.id === nextId) ?? null,
+                    )
+                  }}
                   aria-label="Related project"
                   className={cn(textFieldClass, "h-10 appearance-none pr-8")}
                 >
                   <option value="">
                     {projectsState === "loading" ? "Loading projects…" : "No related project"}
                   </option>
-                  {projects.map((project) => (
+                  {projectOptions.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
                     </option>
@@ -327,7 +398,9 @@ export function CreatePostModal({
                 </select>
                 <p className="text-xs leading-5 text-muted-foreground">
                   {projectsState === "error"
-                    ? "Project records could not be loaded, so this post will not reference one."
+                    ? selectedProject
+                      ? "Project search is unavailable. You can keep this project link or remove it."
+                      : "Project records could not be loaded, so no project can be selected right now."
                     : "Linking a project marks this as a discussion about that record. It does not add your post to the official record."}
                 </p>
               </div>

@@ -108,6 +108,21 @@ function useViewer(source: CommunitySource | null): {
   return { viewer, ready, refresh }
 }
 
+/** Shared read/write capability for Community surfaces outside the main feed. */
+export function useCommunityAccess() {
+  const { source, configError } = useSource()
+  const { viewer, ready: viewerReady, refresh: refreshViewer } = useViewer(source)
+
+  return {
+    source,
+    configError,
+    viewer,
+    viewerReady,
+    refreshViewer,
+    canInteract: Boolean(source && viewer),
+  }
+}
+
 function mapNode(
   nodes: CommentNode[],
   commentId: string,
@@ -166,7 +181,13 @@ function readFeedUrlState(search: string): {
 }
 
 export function useCommunityFeed() {
-  const { source, configError } = useSource()
+  const {
+    source,
+    configError,
+    viewer,
+    viewerReady,
+    refreshViewer,
+  } = useCommunityAccess()
   const initial = useMemo(() => readFeedUrlState(window.location.search), [])
   const [sort, setSort] = useState<SortOption>(initial.sort)
   const [search, setSearch] = useState("")
@@ -178,7 +199,6 @@ export function useCommunityFeed() {
   const [error, setError] = useState<string | null>(configError)
   const [reloadToken, setReloadToken] = useState(0)
   const requestRef = useRef(0)
-  const { viewer, ready: viewerReady, refresh: refreshViewer } = useViewer(source)
   const signOut = useSignOut(source)
 
   const query = useMemo<FeedQuery>(

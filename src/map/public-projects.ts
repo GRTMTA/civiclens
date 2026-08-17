@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js"
-import type { StyleSpecification } from "maplibre-gl"
+import type { FillExtrusionLayerSpecification, StyleSpecification } from "maplibre-gl"
 import {
   parseProjectDetail,
   parseViewportPayload,
@@ -54,16 +54,81 @@ export const SATELLITE_STYLE: StyleSpecification = {
   ],
 }
 
+export const OPENFREEMAP_3D_STYLE = "https://tiles.openfreemap.org/styles/fiord"
+
+
+export const OPENFREEMAP_BUILDING_LAYER = {
+  id: "civiclens-3d-buildings",
+  type: "fill-extrusion",
+  source: "openmaptiles",
+  "source-layer": "building",
+  minzoom: 15,
+  filter: ["match", ["geometry-type"], ["MultiPolygon", "Polygon"], true, false],
+  paint: {
+    "fill-extrusion-color": "#cbd5e1",
+    "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
+    "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+    "fill-extrusion-opacity": 0.72,
+  },
+} satisfies FillExtrusionLayerSpecification
+export type MapProvider = {
+  id: "override" | "openfreemap" | "maptiler" | "eox"
+  name: string
+  style: string | StyleSpecification
+}
+
+export function getMapProviders(
+  configuredStyleUrl: string | undefined = import.meta.env.VITE_MAP_STYLE_URL,
+  mapTilerKey: string | undefined = import.meta.env.VITE_MAPTILER_KEY,
+): MapProvider[] {
+  const providers: MapProvider[] = []
+  const override = configuredStyleUrl?.trim()
+  if (override) {
+    providers.push({ id: "override", name: "Configured map", style: override })
+  }
+
+  providers.push({
+    id: "openfreemap",
+    name: "OpenFreeMap 3D",
+    style: OPENFREEMAP_3D_STYLE,
+  })
+
+  const key = mapTilerKey?.trim()
+  if (key) {
+    providers.push({
+      id: "maptiler",
+      name: "MapTiler Satellite Hybrid",
+      style: `https://api.maptiler.com/maps/hybrid/style.json?key=${encodeURIComponent(key)}`,
+    })
+  }
+
+  providers.push({ id: "eox", name: "EOX Sentinel-2", style: SATELLITE_STYLE })
+  return providers
+}
+
+/** Retained as a small compatibility seam for callers that need one style. */
 export function getMapStyle(
   configuredStyleUrl: string | undefined = import.meta.env.VITE_MAP_STYLE_URL,
   mapTilerKey: string | undefined = import.meta.env.VITE_MAPTILER_KEY,
 ): string | StyleSpecification {
-  const value = configuredStyleUrl?.trim()
-  if (value) return value
-  const key = mapTilerKey?.trim()
-  return key
-    ? `https://api.maptiler.com/maps/hybrid/style.json?key=${encodeURIComponent(key)}`
-    : SATELLITE_STYLE
+  return getMapProviders(configuredStyleUrl, mapTilerKey)[0].style
+}
+
+
+export function nextMapProviderIndex(current: number, providerCount: number): number {
+  return Math.min(Math.max(0, current + 1), Math.max(0, providerCount))
+}
+
+export function mapPitchForZoom(zoom: number): number {
+  return zoom >= 15 ? 55 : 0
+}
+
+export function shouldScheduleMapProviderFallback(
+  providerReady: boolean,
+  providerAlreadyFailed: boolean,
+  fallbackPending: boolean,
+): boolean {
+  return !providerReady && !providerAlreadyFailed && !fallbackPending
 }
 
 export function createPublicRpcClient(): PublicRpcClient {

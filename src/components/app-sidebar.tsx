@@ -2,7 +2,6 @@ import * as React from "react"
 import {
   IconHome,
   IconMapPin,
-  IconInnerShadowTop,
   IconUsersGroup,
 } from "@tabler/icons-react"
 
@@ -48,15 +47,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="data-[slot=sidebar-menu-button]:p-1.5!"
             >
               <a href="/map">
-                <IconInnerShadowTop className="size-5!" />
-                <span className="text-base font-semibold">Source map</span>
+                <IconUsersGroup className="size-5!" />
+                <span className="text-base font-semibold">CivicLens</span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
+        <NavMain items={data.navMain} label="Main" />
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
