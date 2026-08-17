@@ -1782,11 +1782,6 @@ export function ProjectMapSurface() {
           <div className="absolute right-3 top-3 z-20">
             <MockInfrastructurePhotoScan onMatch={selectProject} />
           </div>
-          {response.truncated && (
-            <div className="absolute left-3 right-3 top-14 z-10 rounded-lg border border-primary/30 bg-background/95 px-3 py-2 text-xs text-foreground shadow-sm backdrop-blur-sm">
-              Results are incomplete. Zoom in to see more projects; cluster counts show returned records only.
-            </div>
-          )}
           <Card
             size="sm"
             className="absolute bottom-3 left-3 z-10 max-w-[15rem] gap-0 rounded-xl bg-background/95 py-0 shadow-sm backdrop-blur-sm md:max-w-xs"
@@ -1811,8 +1806,8 @@ export function ProjectMapSurface() {
                   Detailed circles are display-only location indicators, not measured project boundaries. {mapProvider ? `${mapProvider.name} · ` : ""}3D view begins at zoom 15.
                 </p>
               </div>
-            </PopoverContent>
-          </Popover>
+            </CardContent>
+          </Card>
         </section>
 
         <aside className="hidden min-h-0 flex-col lg:flex">
