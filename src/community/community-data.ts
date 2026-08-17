@@ -447,20 +447,28 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
   ): Promise<{ failed: number }> {
     if (files.length === 0) return { failed: 0 }
 
+    const storage = client.storage.from(bucket)
     const uploaded: string[] = []
     let failed = 0
 
     for (const file of files) {
       const path = `${ownerId}/${mediaObjectName(file)}`
-      const { error } = await client.storage
-        .from(bucket)
-        .upload(path, file, { contentType: file.type, upsert: false })
+      const { error } = await storage.upload(path, file, {
+        contentType: file.type,
+        upsert: false,
+      })
       if (error) failed += 1
       else uploaded.push(path)
     }
 
     if (uploaded.length > 0) {
-      await rpc(attachRpc, { [idArg]: ownerId, p_paths: uploaded })
+      try {
+        await rpc(attachRpc, { [idArg]: ownerId, p_paths: uploaded })
+      } catch (cause) {
+        // Registration failed, so do not leave inaccessible objects behind.
+        await storage.remove(uploaded).catch(() => undefined)
+        throw cause
+      }
     }
 
     return { failed }

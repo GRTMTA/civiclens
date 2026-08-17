@@ -262,23 +262,41 @@ export function useCommunityFeed() {
   const createPost = useCallback(
     async (input: NewPostInput) => {
       if (!source) throw new Error(configError ?? "Community discussion is unavailable.")
-      const created = await source.createPost(input)
+
+      let created: CommunityPost
+      setError(null)
+      try {
+        created = await source.createPost(input)
+      } catch (cause) {
+        if (!isCommunityMediaError(cause) || !cause.publishedPost) throw cause
+        // The post exists. Treat this as partial success so retrying the
+        // composer cannot publish a duplicate post.
+        created = cause.publishedPost
+        setError(cause.message)
+      }
+
       // Land on the new discussion by clearing filters and showing newest first.
       setSort("new")
       setSearch("")
       setTopic(null)
       setKind(null)
       setProjectId(null)
-      setPosts(
-        await source.listPosts({
-          sort: "new",
-          search: "",
-          topic: null,
-          projectId: null,
-          kind: null,
-          author: null,
-        }),
-      )
+      setPosts((current) => [created, ...current.filter((post) => post.id !== created.id)])
+
+      try {
+        setPosts(
+          await source.listPosts({
+            sort: "new",
+            search: "",
+            topic: null,
+            projectId: null,
+            kind: null,
+            author: null,
+          }),
+        )
+      } catch (cause) {
+        setError(messageFor(cause, "Your post was published. Refresh to update the feed."))
+      }
       return created
     },
     [configError, source],

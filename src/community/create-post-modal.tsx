@@ -466,14 +466,7 @@ export function CreatePostModal({
 
               {/* PHOTOS */}
               <div className="space-y-2">
-                <p className={fieldLabelClass}>Photos</p>
-                <MediaPreviewList
-                  files={photos}
-                  uploading={submitting}
-                  onRemove={(index) =>
-                    setPhotos((current) => current.filter((_, i) => i !== index))
-                  }
-                />
+                <p className={fieldLabelClass}>Images</p>
                 <input
                   ref={photoInputRef}
                   id={`${fieldId}-photos`}
@@ -483,19 +476,37 @@ export function CreatePostModal({
                   className="sr-only"
                   onChange={(event) => addPhotos(event.target.files)}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={photos.length >= POST_PHOTO_MAX || submitting}
-                  onClick={() => photoInputRef.current?.click()}
+                <div
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    if (!submitting) addPhotos(event.dataTransfer.files)
+                  }}
+                  className="flex min-h-32 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-secondary/30 px-4 py-5 text-center transition-colors hover:border-primary/50 hover:bg-secondary/50"
                 >
-                  <ImagePlus aria-hidden="true" />
-                  Add photos
-                </Button>
+                  <ImagePlus className="mb-2 size-6 text-muted-foreground" aria-hidden="true" />
+                  <p className="text-sm font-medium">Drag and drop images here</p>
+                  <p className="mt-1 text-xs text-muted-foreground">or</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    disabled={photos.length >= POST_PHOTO_MAX || submitting}
+                    onClick={() => photoInputRef.current?.click()}
+                  >
+                    Upload images
+                  </Button>
+                </div>
+                <MediaPreviewList
+                  files={photos}
+                  uploading={submitting}
+                  onRemove={(index) =>
+                    setPhotos((current) => current.filter((_, i) => i !== index))
+                  }
+                />
                 <p className="text-xs leading-5 text-muted-foreground">
-                  Up to {POST_PHOTO_MAX} photos, 5MB each. Photos you add are resident-supplied
-                  supporting material.
+                  JPEG, PNG, or WebP. Up to {POST_PHOTO_MAX} images, 5MB each.
                 </p>
               </div>
 

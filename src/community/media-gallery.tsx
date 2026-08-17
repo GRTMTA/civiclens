@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { X } from "lucide-react"
+import { ChevronLeft, ChevronRight, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { MediaItem } from "./community-contract"
@@ -22,46 +22,63 @@ export function MediaGallery({
   size?: "sm" | "default"
   label?: string
 }) {
-  const [lightbox, setLightbox] = useState<MediaItem | null>(null)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const lightbox = lightboxIndex === null ? null : media[lightboxIndex]
 
-  const close = useCallback(() => setLightbox(null), [])
+  const close = useCallback(() => setLightboxIndex(null), [])
+  const move = useCallback(
+    (direction: -1 | 1) => {
+      setLightboxIndex((current) =>
+        current === null ? null : (current + direction + media.length) % media.length,
+      )
+    },
+    [media.length],
+  )
 
   useEffect(() => {
     if (!lightbox) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") close()
+      if (event.key === "ArrowLeft" && media.length > 1) move(-1)
+      if (event.key === "ArrowRight" && media.length > 1) move(1)
     }
     document.addEventListener("keydown", onKeyDown)
-    // Prevent the page behind the lightbox from scrolling under it.
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = "hidden"
     return () => {
       document.removeEventListener("keydown", onKeyDown)
       document.body.style.overflow = previousOverflow
     }
-  }, [close, lightbox])
+  }, [close, lightbox, media.length, move])
 
   if (media.length === 0) return null
 
+  const compact = size === "sm"
   const single = media.length === 1
-  const height = size === "sm" ? "h-28" : single ? "h-56 sm:h-72" : "h-32 sm:h-40"
 
   return (
     <>
       <ul
         className={cn(
-          "grid gap-2",
-          single ? "grid-cols-1" : media.length === 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3",
+          "grid overflow-hidden rounded-xl border border-border bg-black/90",
+          single ? "grid-cols-1" : "grid-cols-2",
+          !single && "gap-px",
           className,
         )}
       >
         {media.map((item, index) => (
-          <li key={item.id} className="min-w-0">
+          <li
+            key={item.id}
+            className={cn(
+              "min-w-0 bg-secondary/40",
+              !compact && media.length === 3 && index === 0 && "row-span-2",
+            )}
+          >
             <button
               type="button"
-              onClick={() => setLightbox(item)}
+              onClick={() => setLightboxIndex(index)}
               aria-label={`${label} ${index + 1} of ${media.length} — open larger`}
-              className="group/media block w-full overflow-hidden rounded-lg border border-border bg-secondary/40 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="group/media block h-full w-full overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             >
               <img
                 src={item.url}
@@ -69,8 +86,14 @@ export function MediaGallery({
                 loading="lazy"
                 decoding="async"
                 className={cn(
-                  "w-full object-cover transition-transform duration-200 group-hover/media:scale-[1.02]",
-                  height,
+                  "w-full transition-transform duration-200 group-hover/media:scale-[1.015]",
+                  compact
+                    ? "h-28 object-cover"
+                    : single
+                      ? "max-h-[32rem] min-h-56 object-contain sm:min-h-72"
+                      : media.length === 3 && index === 0
+                        ? "h-full min-h-72 object-cover sm:min-h-96"
+                        : "h-36 object-cover sm:h-48",
                 )}
               />
             </button>
@@ -78,13 +101,13 @@ export function MediaGallery({
         ))}
       </ul>
 
-      {lightbox && (
+      {lightbox && lightboxIndex !== null && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={`${label}, enlarged`}
+          aria-label={`${label} ${lightboxIndex + 1} of ${media.length}, enlarged`}
           onClick={close}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[oklch(0.1_0.02_256_/_0.88)] p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
         >
           <img
             src={lightbox.url}
@@ -92,12 +115,41 @@ export function MediaGallery({
             className="max-h-[88dvh] max-w-full rounded-lg object-contain"
             onClick={(event) => event.stopPropagation()}
           />
+          {media.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  move(-1)
+                }}
+                aria-label="Previous photo"
+                className="absolute left-3 inline-flex size-10 items-center justify-center rounded-full bg-card/90 text-foreground outline-none hover:bg-card focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronLeft className="size-5" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  move(1)
+                }}
+                aria-label="Next photo"
+                className="absolute right-3 inline-flex size-10 items-center justify-center rounded-full bg-card/90 text-foreground outline-none hover:bg-card focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronRight className="size-5" aria-hidden="true" />
+              </button>
+            </>
+          )}
+          <span className="absolute bottom-4 rounded-full bg-card/90 px-3 py-1 text-xs text-foreground tabular-nums">
+            {lightboxIndex + 1} / {media.length}
+          </span>
           <button
             type="button"
             onClick={close}
             autoFocus
             aria-label="Close photo"
-            className="absolute top-4 right-4 inline-flex size-9 items-center justify-center rounded-full border border-border bg-card text-foreground outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-ring/60"
+            className="absolute top-4 right-4 inline-flex size-9 items-center justify-center rounded-full bg-card/90 text-foreground outline-none hover:bg-card focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="size-4" aria-hidden="true" />
           </button>
