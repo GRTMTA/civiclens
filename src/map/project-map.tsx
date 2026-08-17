@@ -87,6 +87,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { ProjectCommunityContext } from "./project-community-context"
+import { ProjectIntelligencePanel } from "./project-intelligence-panel"
 import { ProjectTimeline } from "./project-timeline"
 import {
   PROJECT_INDICATOR_COLOR,
@@ -715,6 +716,10 @@ function ProjectDetailContent({
       {detail.description && (
         <p className="text-sm leading-6 text-muted-foreground">{detail.description}</p>
       )}
+
+      <Separator />
+      <ProjectIntelligencePanel detail={detail} />
+      <Separator />
 
       <Alert className={
         detail.geometryKind === "official"

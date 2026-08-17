@@ -87,11 +87,11 @@ def test_invalid_viewport_is_rejected(client: TestClient) -> None:
 
 
 def test_browser_map_routes_are_public_and_normalized(client: TestClient) -> None:
-    response = client.get("/map/projects", headers={"Origin": "http://localhost:5173"}, params={
+    response = client.get("/map/projects", headers={"Origin": "http://localhost:5174"}, params={
         "south": 10, "west": 123, "north": 11, "east": 125,
     })
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5174"
     feature = response.json()["features"][0]
     assert feature["id"] == "dpwh-A-1"
     assert feature["properties"]["recorded_coordinates"] == [123.89, 10.31]

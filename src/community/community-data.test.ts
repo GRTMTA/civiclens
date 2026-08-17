@@ -214,6 +214,7 @@ describe("project-linked Community writes", () => {
       body: "When is the next phase expected?",
       topic: "roads",
       projectId: "dpwh-1",
+      projectName: "Road project",
       areaLabel: null,
       photos: [],
     })
@@ -223,6 +224,7 @@ describe("project-linked Community writes", () => {
       p_body: "When is the next phase expected?",
       p_topic: "roads",
       p_project_id: "dpwh-1",
+      p_project_name: "Road project",
       p_kind: "discussion",
       p_area_label: null,
     })

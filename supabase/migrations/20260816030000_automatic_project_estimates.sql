@@ -279,7 +279,7 @@ begin
 
   if tg_op = 'UPDATE' then
     automatic_values_changed :=
-      new.automatic_estimate_geometry is distinct from old.automatic_estimate_geometry
+      extensions.st_asbinary(new.automatic_estimate_geometry) is distinct from extensions.st_asbinary(old.automatic_estimate_geometry)
       or new.automatic_estimate_method is distinct from old.automatic_estimate_method
       or new.automatic_estimate_class is distinct from old.automatic_estimate_class
       or new.automatic_estimate_osm_type is distinct from old.automatic_estimate_osm_type

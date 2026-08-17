@@ -18,7 +18,9 @@ When the authenticated `scan-project` Edge Function is invoked without `GROQ_API
 - `src/app-routes.ts`: paths the landing/auth bundle owns, plus the post-login destination
 - `src/community`: the `/community`, `/community/post/:postId`, and `/community/profile/:username` surface
 - `src/components/auth-menu.tsx`: the single persistent authentication control, used by both shells
-- `src/map`: the official project map, including the community context and timeline sections
+- `src/map`: the official project map, including the CivicLens Intelligence, community context, and timeline sections
+- `src/map/project-intelligence.ts`: the deterministic per-project evidence assessment
+- `src/map/project-intelligence-panel.tsx`: the CivicLens Intelligence section of the project dialog
 - `supabase/migrations`: PostGIS schema, profile provisioning, RLS policies, and database functions
 - `supabase/functions/scan-project`: authenticated Groq image analysis and project matching
 - `supabase/seed.sql`: local-only demo community content (see below)
@@ -55,6 +57,31 @@ node --experimental-strip-types scripts/verify-community-auth.ts  # posting, med
 ```
 
 Both scripts need a running local stack and exit non-zero on failure. They are excluded from `npm test`, which stays offline.
+
+## CivicLens Intelligence
+
+Each project dialog carries a **CivicLens Intelligence** section between the headline record figures and the geometry/community sections. It is an analytical layer over the published record, not a chat surface, and it identifies verification gaps rather than alleging wrongdoing.
+
+`src/map/project-intelligence.ts` derives the reading; it is pure and deterministic, so identical inputs always yield identical confidence, wording, gaps, and evidence. Inputs are the DPWH record fields, the resident discussion explicitly linked to that project, the community pulse counts, and the stored geometry provenance. There is no model call: the reading is reproducible and auditable, and different projects genuinely produce different confidence and conclusions.
+
+Sections render in scanning order: confidence, assessment, transparency gaps, community signals, evidence.
+
+- **Confidence** is a weighted score over eight evidence factors (record completeness, internal consistency, recency, independent local observation, agreement among residents, record against resident accounts, geographic corroboration, external reference availability). It is bounded to 28–96% and banded high (≥78), moderate (≥58), or low. "How this was scored" discloses every factor's score and weight. Confidence describes evidence quality and agreement, never model certainty.
+- **Assessment** is three sentences: what the record states, what residents reported, and how the two compare.
+- **Transparency gaps** are severity-ranked and capped at five. A clean, corroborated record reports "No significant gaps detected".
+- **Community signals** weight distinct residents, not post volume. One resident is a `single` account and is never presented as a community pattern; three or more residents raising the same theme is `recurring`. Theme labels are written as attributed reports ("Reported as incomplete on site"), so no theme can read as a CivicLens finding. Theme matching covers common Cebuano and Tagalog phrasing alongside English.
+- **Evidence** lists each category as supporting, partial, or a gap, and every conclusion carries source chips that open the underlying facts.
+
+Source chips link only to real, resolvable locations: the published record URL, the project's community feed, an OpenStreetMap reference for the recorded point, the imagery provider, and PhilGEPS for the unmatched procurement cross-check. Do not add fabricated citations. Procurement is deliberately reported as *not yet cross-referenced* rather than presented as checked.
+
+Resident discussion is one evidence category. If it cannot be read, the panel degrades — confidence recomputes from record and geographic evidence only and says so — instead of hiding the section.
+
+Two guardrails are enforced by `src/map/project-intelligence.test.ts` and must stay green:
+
+1. No output may allege wrongdoing. The tests reject fraud, corruption, theft, falsification, and anomaly vocabulary across every generated string.
+2. No output may expose the internals as unfinished. The tests reject mock, simulated, demo, placeholder, fake, and prototype vocabulary in user-visible strings.
+
+Resident claims are always attributed ("Several residents report…") and never restated as established fact.
 
 ## Satellite map and project geometry
 
