@@ -95,7 +95,6 @@ import {
 } from "./project-map-style"
 import {
   createPublicRpcClient,
-  fetchAvailableProjects,
   fetchProjectDetail,
   fetchViewportProjects,
   getMapProviders,
@@ -1533,7 +1532,6 @@ export function ProjectMapSurface() {
   const providerFailureTimerRef = useRef<number | null>(null)
   const hasResponseRef = useRef(false)
   const lastBoundsRef = useRef(DEFAULT_BOUNDS)
-  const scanFallbackProjectsRef = useRef<readonly ViewportFeature[]>([])
   const failedProvidersRef = useRef(new Set<string>())
   const readyProvidersRef = useRef(new Set<string>())
   const providers = useMemo(() => getMapProviders(), [])
@@ -1562,18 +1560,6 @@ export function ProjectMapSurface() {
       setQueryError(error instanceof Error ? error.message : "Unable to load projects.")
     }
   }, [])
-
-  const loadAvailableScanProjects = useCallback(async () => {
-    if (response.features.length > 0) return response.features
-    if (scanFallbackProjectsRef.current.length > 0) {
-      return scanFallbackProjectsRef.current
-    }
-
-    if (!clientRef.current) clientRef.current = createPublicRpcClient()
-    const available = await fetchAvailableProjects(clientRef.current)
-    scanFallbackProjectsRef.current = available.features
-    return available.features
-  }, [response.features])
 
   useEffect(() => {
     void loadViewport(DEFAULT_BOUNDS)
@@ -1794,11 +1780,7 @@ export function ProjectMapSurface() {
             />
           )}
           <div className="absolute right-3 top-3 z-20">
-            <MockInfrastructurePhotoScan
-              projects={response.features}
-              loadAvailableProjects={loadAvailableScanProjects}
-              onMatch={selectProject}
-            />
+            <MockInfrastructurePhotoScan onMatch={selectProject} />
           </div>
           {response.truncated && (
             <div className="absolute left-3 right-3 top-14 z-10 rounded-lg border border-primary/30 bg-background/95 px-3 py-2 text-xs text-foreground shadow-sm backdrop-blur-sm">

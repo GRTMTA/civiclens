@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  fetchAvailableProjects,
   fetchProjectDetail,
   fetchViewportProjects,
   getMapProviders,
@@ -104,25 +103,6 @@ describe("public project data seam", () => {
           p_east: 124,
         },
       },
-    ])
-  })
-
-  it("loads available photo-match candidates beyond the current viewport", async () => {
-    const requests: Record<string, string | number>[] = []
-    const result = await fetchAvailableProjects({
-      rpc: async () => ({ data: null, error: null }),
-      get: async (args) => {
-        requests.push(args)
-        return {
-          data: { type: "FeatureCollection", truncated: false, features: [] },
-          error: null,
-        }
-      },
-    })
-
-    expect(result).toEqual({ features: [], truncated: false })
-    expect(requests).toEqual([
-      { south: -90, west: -180, north: 90, east: 180 },
     ])
   })
 

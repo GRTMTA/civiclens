@@ -6,6 +6,7 @@ import {
   distanceBetweenCoordinatesMeters,
   findNearestViewportProject,
   MOCK_SCAN_MAX_IMAGE_BYTES,
+  MOCK_SCAN_TARGET_PROJECT,
   validateMockScanImage,
 } from "./mock-photo-scan"
 
@@ -45,33 +46,30 @@ describe("mock infrastructure photo scan", () => {
     expect(distanceBetweenCoordinatesMeters([123.88, 10.31], [123.88, 10.31])).toBe(0)
   })
 
-  it("creates reproducible simulated location metadata near a loaded project", () => {
-    const first = createMockPhotoScan(photo, projects)
-    const second = createMockPhotoScan(photo, projects)
+  it("always matches DPWH contract 17HH0130 with reproducible simulated metadata", () => {
+    const first = createMockPhotoScan(photo)
+    const second = createMockPhotoScan(photo)
 
     expect(first).toEqual(second)
-    expect(first.location).not.toBeNull()
-    expect(first.matchedProject).not.toBeNull()
+    expect(first.matchedProject).toBe(MOCK_SCAN_TARGET_PROJECT)
+    expect(first.matchedProject).toMatchObject({
+      id: "dpwh-17HH0130",
+      name: "CONSTRUCTION / MAINTENANCE OF FLOOD CONTROL MITIGATION STRUCTURES, BRGY. MAMBALING, CEBU CITY",
+      coordinates: [123.8754864, 10.2894062],
+    })
     expect(first.matchDistanceMeters).toBeGreaterThanOrEqual(10)
     expect(first.matchDistanceMeters).toBeLessThan(35)
   })
 
-  it("uses whichever project feed is current when the demo result is created", () => {
-    const original = createMockPhotoScan(photo, [projects[0]])
-    const replacement = feature("replacement", [123.95, 10.35])
-    const updated = createMockPhotoScan(photo, [replacement])
+  it("keeps the fixed contract match for different uploaded photos", () => {
+    const anotherPhoto = {
+      ...photo,
+      name: "flood-control.png",
+      type: "image/png",
+      size: 512_000,
+    }
 
-    expect(original.matchedProject?.id).toBe("north")
-    expect(updated.matchedProject?.id).toBe("replacement")
-    expect(createMockPhotoScan(photo, []).matchedProject).toBeNull()
-  })
-
-  it("does not fabricate a location or match when no projects are loaded", () => {
-    expect(createMockPhotoScan(photo, [])).toEqual({
-      location: null,
-      matchedProject: null,
-      matchDistanceMeters: null,
-    })
+    expect(createMockPhotoScan(anotherPhoto).matchedProject?.id).toBe("dpwh-17HH0130")
   })
 
   it("accepts images up to 10 MB and rejects invalid files", () => {

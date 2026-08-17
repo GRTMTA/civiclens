@@ -14,10 +14,8 @@ const scanLogicSource = readSource("./mock-photo-scan.ts")
 describe("mock infrastructure photo scan UI", () => {
   it("places the scan action at the map top-right and reuses real project selection", () => {
     expect(projectMapSource).toContain('className="absolute right-3 top-3 z-20"')
-    expect(projectMapSource).toContain("<MockInfrastructurePhotoScan")
-    expect(projectMapSource).toContain("projects={response.features}")
-    expect(projectMapSource).toContain("loadAvailableProjects={loadAvailableScanProjects}")
-    expect(projectMapSource).toContain("onMatch={selectProject}")
+    expect(projectMapSource).toContain("<MockInfrastructurePhotoScan onMatch={selectProject} />")
+    expect(projectMapSource).not.toContain("loadAvailableProjects={loadAvailableScanProjects}")
   })
 
   it("offers camera and gallery inputs with staged location-only demo feedback", () => {
@@ -28,12 +26,12 @@ describe("mock infrastructure photo scan UI", () => {
     expect(scanUiSource.match(/tabIndex=\{-1\}/g)).toHaveLength(2)
     expect(scanUiSource).toContain("Choose from gallery")
     expect(scanUiSource).not.toContain("<Button asChild")
-    expect(scanUiSource).toContain("projectsRef.current = projects")
-    expect(scanUiSource).toContain("loadAvailableProjectsRef.current()")
-    expect(scanUiSource).toContain("createMockPhotoScan(nextFile, candidates)")
+    expect(scanUiSource).toContain("createMockPhotoScan(nextFile)")
     expect(scanUiSource).toContain("Simulating photo location metadata…")
-    expect(scanUiSource).toContain("Finding an available official project…")
+    expect(scanUiSource).toContain("Matching DPWH contract 17HH0130…")
     expect(scanUiSource).toContain("Simulated photo location")
+    expect(scanLogicSource).toContain('id: "dpwh-17HH0130"')
+    expect(scanLogicSource).toContain("CONSTRUCTION / MAINTENANCE OF FLOOD CONTROL MITIGATION STRUCTURES, BRGY. MAMBALING, CEBU CITY")
   })
 
   it("keeps photos temporary and performs no upload or external scan request", () => {

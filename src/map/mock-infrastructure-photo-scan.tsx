@@ -25,16 +25,12 @@ type ScanPhase = "idle" | "error" | "scanning" | "matched" | "no_match";
 const SCAN_STAGES = [
   "Preparing photo in your browser…",
   "Simulating photo location metadata…",
-  "Finding an available official project…",
+  "Matching DPWH contract 17HH0130…",
 ] as const;
 
 export function MockInfrastructurePhotoScan({
-  projects,
-  loadAvailableProjects,
   onMatch,
 }: {
-  projects: readonly ViewportFeature[];
-  loadAvailableProjects: () => Promise<readonly ViewportFeature[]>;
   onMatch: (project: ViewportFeature) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -46,13 +42,9 @@ export function MockInfrastructurePhotoScan({
   const [result, setResult] = useState<MockPhotoScanResult | null>(null);
   const timersRef = useRef<number[]>([]);
   const generationRef = useRef(0);
-  const projectsRef = useRef(projects);
-  const loadAvailableProjectsRef = useRef(loadAvailableProjects);
   const onMatchRef = useRef(onMatch);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
-  projectsRef.current = projects;
-  loadAvailableProjectsRef.current = loadAvailableProjects;
   onMatchRef.current = onMatch;
 
   const clearTimers = useCallback(() => {
@@ -107,35 +99,20 @@ export function MockInfrastructurePhotoScan({
       schedule(650, () => setStage(1));
       schedule(1_300, () => setStage(2));
       schedule(2_000, () => {
-        void (async () => {
-          let candidates = projectsRef.current;
-          if (candidates.length === 0) {
-            try {
-              const loadedProjects = await loadAvailableProjectsRef.current();
-              candidates = projectsRef.current.length > 0
-                ? projectsRef.current
-                : loadedProjects;
-            } catch {
-              candidates = projectsRef.current;
-            }
-          }
-          if (generation !== generationRef.current) return;
+        const nextResult = createMockPhotoScan(nextFile);
+        const matchedProject = nextResult.matchedProject;
+        setResult(nextResult);
+        if (!matchedProject) {
+          setPhase("no_match");
+          return;
+        }
 
-          const nextResult = createMockPhotoScan(nextFile, candidates);
-          const matchedProject = nextResult.matchedProject;
-          setResult(nextResult);
-          if (!matchedProject) {
-            setPhase("no_match");
-            return;
-          }
-
-          setPhase("matched");
-          schedule(900, () => {
-            setOpen(false);
-            resetScan();
-            onMatchRef.current(matchedProject);
-          });
-        })();
+        setPhase("matched");
+        schedule(900, () => {
+          setOpen(false);
+          resetScan();
+          onMatchRef.current(matchedProject);
+        });
       });
     },
     [clearTimers, resetScan],

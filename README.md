@@ -25,7 +25,7 @@ When the authenticated `scan-project` Edge Function is invoked without `GROQ_API
 
 Client routes are `/` (landing), `/login`, `/register`, `/map`, `/community`, `/community/post/:postId`, and `/community/profile/:username`; anything else renders the not-found screen. Authentication returns residents to `/community`.
 
-Report photos are private and stored under the authenticated user's folder. Groq credentials are Edge Function secrets and must never use the `VITE_` prefix. Explore Map includes a clearly labeled, browser-only photo-scanning demonstration that simulates location metadata and matches an available project from the configured feed, loading a fallback candidate beyond the current viewport when necessary; it does not upload or store the image and does not call `scan-project`. The authenticated `scan-project` Edge Function remains deployed for future image analysis and project matching.
+Report photos are private and stored under the authenticated user's folder. Groq credentials are Edge Function secrets and must never use the `VITE_` prefix. Explore Map includes a clearly labeled, browser-only photo-scanning demonstration that simulates location metadata and always matches DPWH contract `17HH0130` in Brgy. Mambaling, Cebu City; it does not upload or store the image and does not call `scan-project`. The authenticated `scan-project` Edge Function remains deployed for future image analysis and project matching.
 
 ## Community context layer
 

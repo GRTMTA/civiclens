@@ -17,6 +17,22 @@ export type MockPhotoScanResult = {
 
 const EARTH_RADIUS_METERS = 6_371_000
 
+export const MOCK_SCAN_TARGET_PROJECT: ViewportFeature = {
+  id: "dpwh-17HH0130",
+  name: "CONSTRUCTION / MAINTENANCE OF FLOOD CONTROL MITIGATION STRUCTURES, BRGY. MAMBALING, CEBU CITY",
+  category: "Flood Control and Drainage",
+  source: "DPWH Transparency Portal via BetterGov archive",
+  rawStatus: "Completed",
+  displayStatus: "completed",
+  coordinates: [123.8754864, 10.2894062],
+  displayGeometry: {
+    type: "Point",
+    coordinates: [123.8754864, 10.2894062],
+  },
+  displayMode: "location_indicator",
+  geometryKind: "estimated",
+}
+
 function stableFileHash(file: MockPhotoFile) {
   const input = `${file.name}\u0000${file.type}\u0000${file.size}\u0000${file.lastModified}`
   let hash = 2_166_136_261
@@ -88,32 +104,28 @@ export function findNearestViewportProject(
 }
 
 /**
- * Demonstration only: simulates EXIF coordinates near a loaded project, then applies a real
- * nearest-coordinate match. It does not inspect image bytes or contact any external service.
+ * Demonstration only: every valid photo simulates EXIF coordinates near the fixed DPWH
+ * contract 17HH0130 target. It does not inspect image bytes or contact any external service.
  */
 export function createMockPhotoScan(
   file: MockPhotoFile,
-  projects: readonly ViewportFeature[],
 ): MockPhotoScanResult {
-  if (projects.length === 0) {
-    return { location: null, matchedProject: null, matchDistanceMeters: null }
-  }
-
   const hash = stableFileHash(file)
-  const anchor = projects[hash % projects.length]
   const simulatedCoordinates = offsetCoordinates(
-    anchor.coordinates,
+    MOCK_SCAN_TARGET_PROJECT.coordinates,
     12 + ((hash >>> 8) % 1_800) / 100,
     (hash >>> 16) % 360,
   )
-  const nearest = findNearestViewportProject(projects, simulatedCoordinates)
 
   return {
     location: {
       latitude: simulatedCoordinates[1],
       longitude: simulatedCoordinates[0],
     },
-    matchedProject: nearest?.project ?? null,
-    matchDistanceMeters: nearest?.distanceMeters ?? null,
+    matchedProject: MOCK_SCAN_TARGET_PROJECT,
+    matchDistanceMeters: distanceBetweenCoordinatesMeters(
+      simulatedCoordinates,
+      MOCK_SCAN_TARGET_PROJECT.coordinates,
+    ),
   }
 }
