@@ -14,6 +14,7 @@ import pristine from "./assets/city-pristine.png";
 import damaged from "./assets/city-damaged.png";
 import "./styles.css";
 import "./auth.css";
+import "./route-transitions.css";
 
 const SPOTLIGHT_RADIUS = 240;
 

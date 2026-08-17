@@ -4,6 +4,7 @@ import { PostDetailPage } from "./community/post-detail-page"
 import { ProfilePage } from "./community/profile-page"
 import { readCommunityRoute } from "./community/community-routes"
 import "./dashboard.css"
+import "./route-transitions.css"
 
 const route = readCommunityRoute(window.location.pathname)
 

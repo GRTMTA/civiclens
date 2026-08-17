@@ -222,3 +222,60 @@ describe("reviewed estimate map contract", () => {
     })
   })
 })
+
+
+describe("automatic estimate map contract", () => {
+  it("preserves automatic OSM and circular fallback provenance as non-official", () => {
+    const viewport = parseViewportPayload({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: "dpwh-auto-road",
+          geometry: {
+            type: "LineString",
+            coordinates: [[123.9, 10.3], [123.9005, 10.3005]],
+          },
+          properties: {
+            id: "dpwh-auto-road",
+            name: "Automatic road estimate",
+            recorded_coordinates: [123.9, 10.3],
+            geometry_kind: "automatic_estimate",
+            geometry_source: "OpenStreetMap contributors (automatic estimate)",
+            geometry_source_url: "https://www.openstreetmap.org/way/42",
+            geometry_estimate_method: "osm_nearest",
+            geometry_estimate_class: "road",
+          },
+        },
+        {
+          type: "Feature",
+          id: "dpwh-rectangle",
+          geometry: {
+            type: "Polygon",
+            coordinates: [[[123.9, 10.3], [123.901, 10.3], [123.901, 10.301], [123.9, 10.3]]],
+          },
+          properties: {
+            id: "dpwh-rectangle",
+            name: "Fallback building estimate",
+            recorded_coordinates: [123.9, 10.3],
+            geometry_kind: "estimated",
+            geometry_estimate_method: "radius_circle",
+            geometry_estimate_class: "building_area",
+          },
+        },
+      ],
+    })
+
+    expect(viewport.features[0]).toMatchObject({
+      geometryKind: "automatic_estimate",
+      geometryEstimateMethod: "osm_nearest",
+      geometryEstimateClass: "road",
+      geometrySourceUrl: "https://www.openstreetmap.org/way/42",
+    })
+    expect(viewport.features[1]).toMatchObject({
+      geometryKind: "estimated",
+      geometryEstimateMethod: "radius_circle",
+      geometryEstimateClass: "building_area",
+    })
+  })
+})

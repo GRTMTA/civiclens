@@ -3,6 +3,7 @@ import { type Icon } from "@tabler/icons-react"
 import {
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -15,6 +16,7 @@ function isActivePath(url: string, pathname: string): boolean {
 
 export function NavMain({
   items,
+  label,
   currentPath = typeof window === "undefined" ? "" : window.location.pathname,
 }: {
   items: {
@@ -22,10 +24,12 @@ export function NavMain({
     url: string
     icon?: Icon
   }[]
+  label?: string
   currentPath?: string
 }) {
   return (
     <SidebarGroup>
+      {label && <SidebarGroupLabel>{label}</SidebarGroupLabel>}
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((item) => {

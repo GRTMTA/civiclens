@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 
-import { requestSignIn } from "./community-auth"
+import { communityActionDecision, requestSignIn } from "./community-auth"
 import { CommunityFeed } from "./community-feed"
 import { CommunityRightRail } from "./community-right-rail"
 import { CommunityShell } from "./community-shell"
@@ -45,11 +45,9 @@ export function CommunityPage() {
   // ignored until the viewer resolves so a signed-in resident is never bounced
   // to /login and straight back here.
   const requireViewer = (action: () => void) => () => {
-    if (feed.canInteract) {
-      action()
-      return
-    }
-    if (feed.viewerReady) requestSignIn()
+    const decision = communityActionDecision(feed.canInteract, feed.viewerReady)
+    if (decision === "allow") action()
+    else if (decision === "sign-in") requestSignIn()
   }
 
   return (
@@ -106,6 +104,7 @@ export function CommunityPage() {
         onOpenChange={setComposerOpen}
         onSubmit={feed.createPost}
         defaultProjectId={feed.projectId}
+        defaultProject={scopedProject}
       />
     </CommunityShell>
   )

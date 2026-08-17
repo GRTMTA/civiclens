@@ -1,5 +1,10 @@
 export type DisplayStatus = "ongoing" | "completed" | "planned" | "unknown"
-export type GeometryKind = "official" | "reviewed_estimate" | "estimated"
+export type GeometryKind =
+  | "official"
+  | "reviewed_estimate"
+  | "automatic_estimate"
+  | "estimated"
+export type GeometryEstimateMethod = "osm_nearest" | "radius_circle"
 
 type Position = [number, number]
 
@@ -35,6 +40,8 @@ export type ViewportFeature = {
   geometryKind: GeometryKind
   geometrySource?: string
   geometrySourceUrl?: string
+  geometryEstimateMethod?: GeometryEstimateMethod
+  geometryEstimateClass?: string
 }
 
 export type ViewportResponse = {
@@ -69,6 +76,8 @@ export type ProjectDetail = {
   geometryKind: GeometryKind
   geometrySource?: string
   geometrySourceUrl?: string
+  geometryEstimateMethod?: GeometryEstimateMethod
+  geometryEstimateClass?: string
   geometryReviewedAt?: string
   geometryReviewNote?: string
 }
@@ -168,8 +177,16 @@ export function areaSelectionKind(
 }
 
 function asGeometryKind(value: unknown): GeometryKind {
-  if (value === "official" || value === "reviewed_estimate") return value
+  if (
+    value === "official" ||
+    value === "reviewed_estimate" ||
+    value === "automatic_estimate"
+  ) return value
   return "estimated"
+}
+
+function asGeometryEstimateMethod(value: unknown): GeometryEstimateMethod | undefined {
+  return value === "osm_nearest" || value === "radius_circle" ? value : undefined
 }
 
 export function normalizeOfficialStatus(value: string | null | undefined): DisplayStatus {
@@ -238,6 +255,8 @@ export function parseViewportPayload(value: unknown): ViewportResponse {
         geometryKind: asGeometryKind(properties.geometry_kind),
         geometrySource: asOptionalString(properties.geometry_source),
         geometrySourceUrl: asOptionalString(properties.geometry_source_url),
+        geometryEstimateMethod: asGeometryEstimateMethod(properties.geometry_estimate_method),
+        geometryEstimateClass: asOptionalString(properties.geometry_estimate_class),
       },
     ]
   })
@@ -285,6 +304,8 @@ export function parseProjectDetail(value: unknown): ProjectDetail | null {
     geometryKind: asGeometryKind(project.geometry_kind),
     geometrySource: asOptionalString(project.geometry_source),
     geometrySourceUrl: asOptionalString(project.geometry_source_url),
+    geometryEstimateMethod: asGeometryEstimateMethod(project.geometry_estimate_method),
+    geometryEstimateClass: asOptionalString(project.geometry_estimate_class),
     geometryReviewedAt: asOptionalString(project.geometry_reviewed_at),
     geometryReviewNote: asOptionalString(project.geometry_review_note),
   }
