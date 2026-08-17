@@ -5,9 +5,9 @@ CivicLens is a Cebu City transparency PWA using Supabase Auth, Postgres/PostGIS,
 ## Local setup
 
 1. Install dependencies: `npm install`
-2. Install the Supabase CLI, then run `supabase start`
-3. Copy `.env.example` to `.env.local` and add the local project URL and publishable key from `supabase status`
-4. Add server secrets with `supabase secrets set GROQ_API_KEY=... GROQ_MODEL=qwen/qwen3.6-27b`
+2. Keep the existing `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local`; auth, community, storage, database RPCs, and moderation continue using that hosted Supabase project
+3. Set `VITE_DPWH_API_URL=http://localhost:8000` in `.env.local`
+4. Start only the DPWH API container with `docker compose up --build -d dpwh-api`
 5. Run the web app with `npm run dev`
 
 Without `GROQ_API_KEY`, scans use a safe demo analysis. Project records are loaded separately through the pinned DPWH importer described below. OpenFreeMap is the default 3D-capable basemap; set a domain-restricted MapTiler Free key in `VITE_MAPTILER_KEY` for the first fallback, while `VITE_MAP_STYLE_URL` remains a full style override.
@@ -92,35 +92,34 @@ The public Overpass service is a best-effort community resource, not an unlimite
 
 Mandatory release QA: verify provider attribution is visible; OpenFreeMap is attempted first; failures advance to configured MapTiler and then EOX; the overview remains flat below zoom 15; and the camera pitches at zoom 15+. Verify markers change to project shapes at zoom 15 and official, moderator-reviewed, automatic OSM, and category-rectangle styles are distinguishable; every non-official detail must contain a disclaimer. Verify overlapping areas open a centered, unclipped chooser no wider than 48rem and no taller than 70dvh. On desktop and mobile, verify the selected project opens one centered dialog; at desktop it uses the wider landscape layout (up to 72rem wide and 76dvh tall). Both tabs must support keyboard navigation, occupy equal full-width halves of the dialog, and keep long content independently scrollable. In **Community posts**, verify loading, error/retry, and “No community posts for this project yet.” states; verify every overview is explicitly linked to the selected project and ordered by score, then newest; and verify selecting an overview opens `/community/post/:postId` in the same tab with voting, comments, and sharing available. Finally, verify only moderators see review controls, keyboard and touch map selection work, and complete provider failure leaves the project list usable.
 
-## DPWH hackathon feed
+## DPWH archive feed
 
-Map data is requested through the public `dpwh-projects` Edge Function, which proxies the official DPWH Transparency API used by the [reference scraper](https://github.com/csiiiv/dpwh-transparency-data-api-scraper). This avoids storing the full dataset in Supabase.
+Only the DPWH archive API is local. The browser's `/map` data client calls the FastAPI service in `dpwh-api` directly through `VITE_DPWH_API_URL`; all auth, community, storage, database RPCs, and moderation continue using the existing hosted Supabase project. The first container start downloads roughly 115 MB and persists the indexed DuckDB database in the `dpwh-data` Docker volume; later starts reuse it.
 
-The demo fetches one configurable source page, caches it in the warm function instance for five minutes, filters valid coordinates to the current map bounds, and returns at most 500 markers. Selecting a marker loads its contract details on demand. Configure the page and size with `DPWH_DEMO_PAGE` and `DPWH_DEMO_LIMIT`; the default size is 500 to reduce upstream timeouts, while the API documents a maximum of 5,000.
-
-This is intentionally a hackathon integration. The upstream service can rate-limit or block automated requests, and one page is not a complete geographic index. Choose a page containing the projects you plan to demonstrate, keep refreshes modest, and retain visible DPWH attribution.
-
-Deploy the feed with:
+Start the archive API:
 
 ```bash
-supabase functions deploy dpwh-projects --no-verify-jwt
-supabase secrets set DPWH_DEMO_PAGE=1 DPWH_DEMO_LIMIT=5000
+docker compose up --build -d dpwh-api
+docker compose ps
+curl http://localhost:8000/health
 ```
 
-Project IDs remain `dpwh-<contractId>`. Community posts created against removed imported rows are not automatically recreated; the local seed's two fictional project references remain available for community-flow demonstrations.
+The first health check can take a few minutes while the archive downloads and DuckDB is built. To rebuild from a fresh archive, run `docker compose down -v` before starting it again. Add this alongside the existing hosted Supabase values in `.env.local`:
 
-## Deploy
+```dotenv
+VITE_DPWH_API_URL=http://localhost:8000
+```
 
-Link the CLI to a development project before applying changes:
+No local Supabase stack, Edge Function server, Supabase secret, or DPWH bearer token is required for the demo. The browser-facing endpoints are `GET /map/projects` and `GET /map/projects/{contractId}`; the API limits CORS to the Vite localhost origins. Project IDs remain `dpwh-<contractId>`.
+
+## Local demo
 
 ```bash
-supabase link --project-ref <project-ref>
-supabase db push
-supabase functions deploy scan-project
-supabase functions deploy dpwh-projects --no-verify-jwt
-supabase secrets set GROQ_API_KEY=... GROQ_MODEL=qwen/qwen3.6-27b
-supabase secrets set DPWH_DEMO_PAGE=1 DPWH_DEMO_LIMIT=5000
+docker compose up --build -d dpwh-api
+npm run dev
 ```
+
+Stop only the local DPWH service after the demo with `docker compose down`; the database volume is retained for the next run.
 
 ## Checks
 

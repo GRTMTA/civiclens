@@ -10,6 +10,7 @@ coverage
 data/raw/
 data/generated/
 *.parquet
+*.duckdb
 .venv-dpwh/
 __pycache__/
 .DS_Store

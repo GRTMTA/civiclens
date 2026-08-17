@@ -1,0 +1,20 @@
+services:
+  dpwh-api:
+    build:
+      context: ./dpwh-api
+    ports:
+      - "8000:8000"
+    environment:
+      DPWH_DB_PATH: /data/dpwh.duckdb
+      DPWH_PARQUET_URL: ${DPWH_PARQUET_URL:-https://huggingface.co/datasets/bettergovph/dpwh-transparency-data/resolve/main/dpwh_transparency_data_all_details.parquet}
+    volumes:
+      - dpwh-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 5m
+
+volumes:
+  dpwh-data:

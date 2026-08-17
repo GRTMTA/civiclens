@@ -134,12 +134,19 @@ export function shouldScheduleMapProviderFallback(
   return !providerReady && !providerAlreadyFailed && !fallbackPending
 }
 
+
 export function createPublicRpcClient(): PublicRpcClient {
-  const url = import.meta.env.VITE_SUPABASE_URL
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-  if (!url || !key) {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+  const dpwhApiUrl = import.meta.env.VITE_DPWH_API_URL?.trim().replace(/\/$/, "")
+  if (!supabaseUrl || !supabaseKey) {
     throw new MapConfigurationError(
-      "Project data configuration is required to load the official map.",
+      "Supabase configuration is required for project moderation.",
+    )
+  }
+  if (!dpwhApiUrl) {
+    throw new MapConfigurationError(
+      "VITE_DPWH_API_URL is required to load the DPWH map feed.",
     )
   }
   const client = supabase
@@ -149,20 +156,23 @@ export function createPublicRpcClient(): PublicRpcClient {
       return { data, error }
     },
     get: async (args) => {
-      const query = new URLSearchParams(
-        Object.entries(args).map(([name, value]) => [name, String(value)]),
-      )
-      const response = await fetch(
-        `${url.replace(/\/$/, "")}/functions/v1/dpwh-projects?${query}`,
-        { headers: { apikey: key } },
-      )
+      const projectId = typeof args.id === "string"
+        ? args.id.replace(/^dpwh-/, "").trim()
+        : ""
+      const requestUrl = projectId
+        ? `${dpwhApiUrl}/map/projects/${encodeURIComponent(projectId)}`
+        : `${dpwhApiUrl}/map/projects?${new URLSearchParams(
+            Object.entries(args).map(([name, value]) => [name, String(value)]),
+          )}`
+      const response = await fetch(requestUrl)
       const data = await response.json().catch(() => null)
-      return {
-        data,
-        error: response.ok
-          ? null
-          : { message: (data as { error?: string } | null)?.error || "Unable to load DPWH projects." },
+      if (!response.ok) {
+        const message = typeof data === "object" && data !== null && "detail" in data
+          ? String(data.detail)
+          : `Project data service returned HTTP ${response.status}.`
+        return { data: null, error: { message } }
       }
+      return { data, error: null }
     },
   }
 }
