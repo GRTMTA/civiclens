@@ -14,6 +14,9 @@ export type PublicRpcClient = {
     functionName: string,
     args: Record<string, unknown>,
   ) => Promise<{ data: unknown; error: { message?: string } | null }>
+  get?: (
+    args: Record<string, string | number>,
+  ) => Promise<{ data: unknown; error: { message?: string } | null }>
 }
 
 export class MapConfigurationError extends Error {
@@ -145,6 +148,22 @@ export function createPublicRpcClient(): PublicRpcClient {
       const { data, error } = await client.rpc(functionName, args)
       return { data, error }
     },
+    get: async (args) => {
+      const query = new URLSearchParams(
+        Object.entries(args).map(([name, value]) => [name, String(value)]),
+      )
+      const response = await fetch(
+        `${url.replace(/\/$/, "")}/functions/v1/dpwh-projects?${query}`,
+        { headers: { apikey: key } },
+      )
+      const data = await response.json().catch(() => null)
+      return {
+        data,
+        error: response.ok
+          ? null
+          : { message: (data as { error?: string } | null)?.error || "Unable to load DPWH projects." },
+      }
+    },
   }
 }
 
@@ -152,12 +171,20 @@ export async function fetchViewportProjects(
   bounds: ViewportBounds,
   client: PublicRpcClient = createPublicRpcClient(),
 ): Promise<ViewportResponse> {
-  const { data, error } = await client.rpc("projects_in_view", {
-    p_south: bounds.south,
-    p_west: bounds.west,
-    p_north: bounds.north,
-    p_east: bounds.east,
-  })
+  const request = {
+    south: bounds.south,
+    west: bounds.west,
+    north: bounds.north,
+    east: bounds.east,
+  }
+  const { data, error } = client.get
+    ? await client.get(request)
+    : await client.rpc("projects_in_view", {
+        p_south: bounds.south,
+        p_west: bounds.west,
+        p_north: bounds.north,
+        p_east: bounds.east,
+      })
   if (error) throw new Error(error.message || "Unable to load projects.")
   return parseViewportPayload(data)
 }
@@ -166,9 +193,9 @@ export async function fetchProjectDetail(
   projectId: string,
   client: PublicRpcClient = createPublicRpcClient(),
 ): Promise<ProjectDetail | null> {
-  const { data, error } = await client.rpc("project_detail", {
-    p_project_id: projectId,
-  })
+  const { data, error } = client.get
+    ? await client.get({ id: projectId })
+    : await client.rpc("project_detail", { p_project_id: projectId })
   if (error) throw new Error(error.message || "Unable to load project details.")
   return parseProjectDetail(data)
 }

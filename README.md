@@ -33,7 +33,7 @@ Community is a context layer around official-source project records, not a stand
 
 | Concept | Source | Where it lives |
 | --- | --- | --- |
-| Official-source record | Government data (DPWH snapshot) | `public.projects`, the map |
+| Official-source record | Government data (DPWH API) | On-demand map feed |
 | Community discussion | Resident content | `community_posts` |
 | Supporting photos | Resident-supplied | `community_post_media`, `community_comment_media` |
 
@@ -43,7 +43,7 @@ Community media buckets (`avatars`, `community-post-media`, `community-comment-m
 
 ### Demo content
 
-`supabase/seed.sql` seeds fictional residents and discussion so `/community` is evaluable before a DPWH import. It runs on `supabase db reset` and skips itself if any community content already exists. It is local-only: it creates auth users at `example.invalid`. Do not apply it to a shared project.
+`supabase/seed.sql` seeds fictional residents, discussion, and two clearly marked demo project references so `/community` remains evaluable independently of the DPWH feed. It runs on `supabase db reset` and skips itself if any community content already exists. It is local-only: it creates auth users at `example.invalid`. Do not apply it to a shared project.
 
 ### Verifying against a local database
 
@@ -92,30 +92,22 @@ The public Overpass service is a best-effort community resource, not an unlimite
 
 Mandatory release QA: verify provider attribution is visible; OpenFreeMap is attempted first; failures advance to configured MapTiler and then EOX; the overview remains flat below zoom 15; and the camera pitches at zoom 15+. Verify markers change to project shapes at zoom 15 and official, moderator-reviewed, automatic OSM, and category-rectangle styles are distinguishable; every non-official detail must contain a disclaimer. Verify overlapping areas open a centered, unclipped chooser no wider than 48rem and no taller than 70dvh. On desktop and mobile, verify the selected project opens one centered dialog; at desktop it uses the wider landscape layout (up to 72rem wide and 76dvh tall). Both tabs must support keyboard navigation, occupy equal full-width halves of the dialog, and keep long content independently scrollable. In **Community posts**, verify loading, error/retry, and “No community posts for this project yet.” states; verify every overview is explicitly linked to the selected project and ordered by score, then newest; and verify selecting an overview opens `/community/post/:postId` in the same tab with voting, comments, and sharing available. Finally, verify only moderators see review controls, keyboard and touch map selection work, and complete provider failure leaves the project list usable.
 
-## DPWH dataset import
+## DPWH hackathon feed
 
-Project data comes from the CC0-licensed [BetterGov.PH DPWH Transparency dataset](https://huggingface.co/datasets/bettergovph/dpwh-transparency-data), sourced from the official DPWH Transparency Portal. The importer pins revision `648ea96af4f7625d606fda0b78803917913a26b7` and verifies the Parquet SHA-256 before processing.
+Map data is requested through the public `dpwh-projects` Edge Function, which proxies the official DPWH Transparency API used by the [reference scraper](https://github.com/csiiiv/dpwh-transparency-data-api-scraper). This avoids storing the full dataset in Supabase.
 
-The snapshot contains 248,220 rows. The validated dry run accepts 214,747 geocoded projects and rejects 33,473 records with missing or invalid Philippine coordinates. Raw Parquet and generated reports are gitignored.
+The demo fetches one configurable source page, caches it in the warm function instance for five minutes, filters valid coordinates to the current map bounds, and returns at most 500 markers. Selecting a marker loads its contract details on demand. Configure the page and size with `DPWH_DEMO_PAGE` and `DPWH_DEMO_LIMIT`; the API currently documents a maximum page size of 5,000.
 
-Set up and validate without writing to Supabase:
+This is intentionally a hackathon integration. The upstream service can rate-limit or block automated requests, and one page is not a complete geographic index. Choose a page containing the projects you plan to demonstrate, keep refreshes modest, and retain visible DPWH attribution.
 
-```bash
-python -m venv .venv-dpwh
-.venv-dpwh/bin/python -m pip install -r scripts/requirements-dpwh.txt
-.venv-dpwh/bin/python scripts/import_dpwh.py
-```
-
-Review `data/generated/dpwh-import-summary.json` and `data/generated/dpwh-rejected.jsonl`. Apply any pending schema migrations before importing records:
+Deploy the feed with:
 
 ```bash
-npx supabase db push --dry-run
-npx supabase db push
-SUPABASE_DB_URL='postgresql://...' .venv-dpwh/bin/python scripts/import_dpwh.py --apply
-npx supabase functions deploy scan-project
+supabase functions deploy dpwh-projects --no-verify-jwt
+supabase secrets set DPWH_DEMO_PAGE=1 DPWH_DEMO_LIMIT=5000
 ```
 
-`SUPABASE_DB_URL` must be a server-side direct or session-pooler connection with permission to write `public.projects`; never expose it with a `VITE_` prefix. The importer streams the source, writes in 500-row transactions, and upserts stable `dpwh-<contractId>` IDs. On the current snapshot, plan for hundreds of megabytes to low single-digit gigabytes of Postgres storage after indexes and metadata, then verify actual project and index sizes after import.
+Project IDs remain `dpwh-<contractId>`. Community posts created against removed imported rows are not automatically recreated; the local seed's two fictional project references remain available for community-flow demonstrations.
 
 ## Deploy
 
@@ -125,7 +117,9 @@ Link the CLI to a development project before applying changes:
 supabase link --project-ref <project-ref>
 supabase db push
 supabase functions deploy scan-project
+supabase functions deploy dpwh-projects --no-verify-jwt
 supabase secrets set GROQ_API_KEY=... GROQ_MODEL=qwen/qwen3.6-27b
+supabase secrets set DPWH_DEMO_PAGE=1 DPWH_DEMO_LIMIT=5000
 ```
 
 ## Checks
