@@ -526,33 +526,51 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
 
     async createPost(input) {
       await requireViewer()
-      let createdValue: unknown
-      try {
-        createdValue = await rpc("create_community_post", {
-          p_title: input.title.trim(),
-          p_body: input.body.trim(),
-          p_topic: input.topic,
-          p_project_id: input.projectId,
-          p_kind: input.kind,
-          // Area is meaningful only for an observation.
-          p_area_label: input.kind === "observation" ? input.areaLabel?.trim() || null : null,
-        })
-      } catch (cause) {
-        if (!isCommunityRpcUnavailable(cause, "create_community_post")) throw cause
+
+      const createWithProject = async (projectId: string | null): Promise<unknown> => {
         try {
-          createdValue = await rpc("create_community_post", {
+          return await rpc("create_community_post", {
             p_title: input.title.trim(),
             p_body: input.body.trim(),
             p_topic: input.topic,
-            p_project_id: input.projectId,
+            p_project_id: projectId,
+            p_kind: input.kind,
+            // Area is meaningful only for an observation.
+            p_area_label: input.kind === "observation" ? input.areaLabel?.trim() || null : null,
           })
-        } catch (legacyCause) {
-          if (isCommunityRpcUnavailable(legacyCause, "create_community_post")) {
-            throw new CommunitySchemaMissingError()
+        } catch (cause) {
+          if (!isCommunityRpcUnavailable(cause, "create_community_post")) throw cause
+          try {
+            return await rpc("create_community_post", {
+              p_title: input.title.trim(),
+              p_body: input.body.trim(),
+              p_topic: input.topic,
+              p_project_id: projectId,
+            })
+          } catch (legacyCause) {
+            if (isCommunityRpcUnavailable(legacyCause, "create_community_post")) {
+              throw new CommunitySchemaMissingError()
+            }
+            throw legacyCause
           }
-          throw legacyCause
         }
       }
+
+      let createdValue: unknown
+      try {
+        createdValue = await createWithProject(input.projectId)
+      } catch (cause) {
+        const projectIsMissing =
+          input.projectId &&
+          cause instanceof Error &&
+          cause.message.includes("related project not found")
+        if (!projectIsMissing) throw cause
+        // Live DPWH map records can exist before the Supabase project catalog is
+        // synchronized. Project context is optional, so publish without a stale
+        // foreign-key reference rather than discarding the resident's post.
+        createdValue = await createWithProject(null)
+      }
+
       const created = parsePost(createdValue, publicUrl)
       if (!created) throw new Error("Your post was saved but could not be displayed.")
 
