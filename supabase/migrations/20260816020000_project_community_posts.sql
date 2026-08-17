@@ -6,14 +6,14 @@ create index community_posts_project_created_idx
 
 -- Aggregate only the numeric score. This bypasses vote-row RLS without exposing
 -- voter identities; the outer SECURITY INVOKER query still applies post RLS.
-create function public.community_post_score(p_post_id uuid)
-returns bigint
+create or replace function public.community_post_score(p_post_id uuid)
+returns integer
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select coalesce(sum(v.value), 0)
+  select coalesce(sum(v.value), 0)::integer
   from public.community_post_votes v
   where v.post_id = p_post_id;
 $$;

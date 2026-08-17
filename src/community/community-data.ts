@@ -224,7 +224,7 @@ function parsePost(value: unknown, publicUrl: UrlResolver): CommunityPost | null
     viewerVote: asVote(row.viewer_vote),
     // Without a resolvable name there is nothing meaningful to show, so the
     // reference is dropped rather than rendering an empty chip.
-    project: projectId && projectName ? { id: projectId, name: projectName } : null,
+    project: projectId ? { id: projectId, name: projectName || projectId } : null,
     areaLabel: areaLabel || null,
     media: parseMedia(row.media, POST_MEDIA_BUCKET, publicUrl),
   }
@@ -527,48 +527,38 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
     async createPost(input) {
       await requireViewer()
 
-      const createWithProject = async (projectId: string | null): Promise<unknown> => {
+      let createdValue: unknown
+      try {
+        createdValue = await rpc("create_community_post", {
+          p_title: input.title.trim(),
+          p_body: input.body.trim(),
+          p_topic: input.topic,
+          p_project_id: input.projectId,
+          p_project_name: input.projectName?.trim() || null,
+          p_kind: input.kind,
+          // Area is meaningful only for an observation.
+          p_area_label: input.kind === "observation" ? input.areaLabel?.trim() || null : null,
+        })
+      } catch (cause) {
+        if (!isCommunityRpcUnavailable(cause, "create_community_post")) throw cause
+        // The original RPC cannot preserve post kinds or attach photos. Do not
+        // silently publish a degraded post when either feature was requested.
+        if (input.kind !== "discussion" || input.photos.length > 0) {
+          throw new CommunitySchemaMissingError()
+        }
         try {
-          return await rpc("create_community_post", {
+          createdValue = await rpc("create_community_post", {
             p_title: input.title.trim(),
             p_body: input.body.trim(),
             p_topic: input.topic,
-            p_project_id: projectId,
-            p_kind: input.kind,
-            // Area is meaningful only for an observation.
-            p_area_label: input.kind === "observation" ? input.areaLabel?.trim() || null : null,
+            p_project_id: input.projectId,
           })
-        } catch (cause) {
-          if (!isCommunityRpcUnavailable(cause, "create_community_post")) throw cause
-          try {
-            return await rpc("create_community_post", {
-              p_title: input.title.trim(),
-              p_body: input.body.trim(),
-              p_topic: input.topic,
-              p_project_id: projectId,
-            })
-          } catch (legacyCause) {
-            if (isCommunityRpcUnavailable(legacyCause, "create_community_post")) {
-              throw new CommunitySchemaMissingError()
-            }
-            throw legacyCause
+        } catch (legacyCause) {
+          if (isCommunityRpcUnavailable(legacyCause, "create_community_post")) {
+            throw new CommunitySchemaMissingError()
           }
+          throw legacyCause
         }
-      }
-
-      let createdValue: unknown
-      try {
-        createdValue = await createWithProject(input.projectId)
-      } catch (cause) {
-        const projectIsMissing =
-          input.projectId &&
-          cause instanceof Error &&
-          cause.message.includes("related project not found")
-        if (!projectIsMissing) throw cause
-        // Live DPWH map records can exist before the Supabase project catalog is
-        // synchronized. Project context is optional, so publish without a stale
-        // foreign-key reference rather than discarding the resident's post.
-        createdValue = await createWithProject(null)
       }
 
       const created = parsePost(createdValue, publicUrl)

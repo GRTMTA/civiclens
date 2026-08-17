@@ -148,6 +148,8 @@ export type NewPostInput = {
   body: string
   topic: TopicId
   projectId: string | null
+  /** Display name snapshot for projects served outside Supabase. */
+  projectName?: string | null
   /** Approximate area for an observation; ignored for a discussion. */
   areaLabel: string | null
   /** Photos chosen in the composer, uploaded after the post row exists. */

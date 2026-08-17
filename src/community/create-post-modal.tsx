@@ -200,6 +200,10 @@ export function CreatePostModal({
       body,
       topic,
       projectId: relatedProjectId || null,
+      projectName:
+        relatedProjectId && selectedProject?.id === relatedProjectId
+          ? selectedProject.name
+          : projectOptions.find((project) => project.id === relatedProjectId)?.name ?? null,
       areaLabel: areaLabel.trim() || null,
       photos,
     }
