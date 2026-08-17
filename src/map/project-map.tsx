@@ -1509,6 +1509,9 @@ export function ProjectMapSurface() {
     initialUrlState.projectId,
   )
   const [selectedFeature, setSelectedFeature] = useState<ViewportFeature | null>(null)
+  const [projectDialogOpen, setProjectDialogOpen] = useState(
+    Boolean(initialUrlState.projectId),
+  )
   const [response, setResponse] = useState<ViewportResponse>({
     features: [],
     truncated: false,
@@ -1639,6 +1642,7 @@ export function ProjectMapSurface() {
     const onPopState = () => {
       const nextState = readMapUrlState(window.location.search)
       setSelectedId(nextState.projectId)
+      setProjectDialogOpen(Boolean(nextState.projectId))
       if (nextState.camera) {
         setCamera(nextState.camera)
         mapRef.current?.flyTo({
@@ -1652,9 +1656,13 @@ export function ProjectMapSurface() {
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
 
-  const selectProject = useCallback((feature: ViewportFeature) => {
+  const focusProject = useCallback((
+    feature: ViewportFeature,
+    openDialog: boolean,
+  ) => {
     setSelectedId(feature.id)
     setSelectedFeature(feature)
+    setProjectDialogOpen(openDialog)
     setListOpen(false)
     const search = writeProjectSearch(window.location.search, feature.id)
     window.history.pushState({ projectId: feature.id }, "", `${window.location.pathname}?${search}`)
@@ -1666,9 +1674,19 @@ export function ProjectMapSurface() {
     })
   }, [camera.zoom])
 
+  const selectProject = useCallback((feature: ViewportFeature) => {
+    focusProject(feature, true)
+  }, [focusProject])
+
+  const focusScannedProject = useCallback((feature: ViewportFeature) => {
+    setProjectsPanelCollapsed(true)
+    focusProject(feature, false)
+  }, [focusProject])
+
   const closeProject = useCallback(() => {
     setSelectedId(null)
     setSelectedFeature(null)
+    setProjectDialogOpen(false)
     const search = writeProjectSearch(window.location.search, null)
     window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}`)
   }, [])
@@ -1779,8 +1797,27 @@ export function ProjectMapSurface() {
               }
             />
           )}
-          <div className="absolute right-3 top-3 z-20">
-            <MockInfrastructurePhotoScan onMatch={selectProject} />
+          <div className="absolute right-3 top-3 z-20 flex max-w-[min(22rem,calc(100%-1.5rem))] flex-col items-end gap-2">
+            <MockInfrastructurePhotoScan onMatch={focusScannedProject} />
+            {selectedFeature && !projectDialogOpen && (
+              <Card size="sm" className="gap-2 bg-background/95 p-3 shadow-lg backdrop-blur-sm" role="status">
+                <p className="text-xs font-medium uppercase tracking-wide text-primary">
+                  Project shown on map
+                </p>
+                <p className="line-clamp-2 text-sm font-medium">
+                  {selectedFeature.name}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="self-end bg-background"
+                  onClick={() => setProjectDialogOpen(true)}
+                >
+                  Open details and community
+                </Button>
+              </Card>
+            )}
           </div>
           <Card
             size="sm"
@@ -1878,7 +1915,7 @@ export function ProjectMapSurface() {
       </Drawer>
       <ProjectDetailDialog
         key={selectedId ?? "closed-project"}
-        selectedId={selectedId}
+        selectedId={projectDialogOpen ? selectedId : null}
         feature={selectedFeature}
         detail={detail}
         loading={detailLoading}

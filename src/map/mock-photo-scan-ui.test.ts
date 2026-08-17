@@ -12,10 +12,14 @@ const scanUiSource = readSource("./mock-infrastructure-photo-scan.tsx")
 const scanLogicSource = readSource("./mock-photo-scan.ts")
 
 describe("mock infrastructure photo scan UI", () => {
-  it("places the scan action at the map top-right and reuses real project selection", () => {
-    expect(projectMapSource).toContain('className="absolute right-3 top-3 z-20"')
-    expect(projectMapSource).toContain("<MockInfrastructurePhotoScan onMatch={selectProject} />")
-    expect(projectMapSource).not.toContain("loadAvailableProjects={loadAvailableScanProjects}")
+  it("shows scan matches on the map before opening project information", () => {
+    expect(projectMapSource).toContain('className="absolute right-3 top-3 z-20 flex')
+    expect(projectMapSource).toContain("<MockInfrastructurePhotoScan onMatch={focusScannedProject} />")
+    expect(projectMapSource).toContain("focusProject(feature, false)")
+    expect(projectMapSource).toContain("focusProject(feature, true)")
+    expect(projectMapSource).toContain("Project shown on map")
+    expect(projectMapSource).toContain("Open details and community")
+    expect(projectMapSource).toContain("selectedId={projectDialogOpen ? selectedId : null}")
   })
 
   it("offers camera and gallery inputs with staged location-only demo feedback", () => {
