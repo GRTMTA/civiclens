@@ -54,12 +54,12 @@ export function selectNearestEstimateCandidate<T>(
     .sort((left, right) => left.distanceMeters - right.distanceMeters)[0] ?? null
 }
 
-/** Creates a geodesic circle with a 50-meter radius around a recorded point. */
-export function createFallbackEstimateCircle(
+/** Creates a geodesic 50-meter map indicator around a recorded project point. */
+export function createProjectLocationCircle(
   longitude: number,
   latitude: number,
   steps = DEFAULT_CIRCLE_STEPS,
-): Extract<ProjectDisplayGeometry, { type: "Polygon" }> {
+): { type: "Polygon"; coordinates: Array<Array<[number, number]>> } {
   if (
     !Number.isFinite(longitude) ||
     !Number.isFinite(latitude) ||
@@ -99,3 +99,6 @@ export function createFallbackEstimateCircle(
   ring[ring.length - 1] = [...ring[0]]
   return { type: "Polygon", coordinates: [ring] }
 }
+
+/** Backward-compatible estimate-specific name for the same 50 m display circle. */
+export const createFallbackEstimateCircle = createProjectLocationCircle

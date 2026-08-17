@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Map as MapLibre,
   NavigationControl,
+  Marker,
   Source,
   Layer,
   type MapLayerMouseEvent,
   type MapRef,
 } from "react-map-gl/maplibre"
-import type { ExpressionSpecification, GeoJSONSource } from "maplibre-gl"
+import type { GeoJSONSource } from "maplibre-gl"
 import {
   AlertCircle,
   CheckCircle2,
@@ -22,6 +23,7 @@ import {
   Search,
 } from "lucide-react"
 
+import locationPin from "@/assets/location-pin.png"
 import { communityActionDecision, requestSignIn } from "@/community/community-auth"
 import { CreatePostModal } from "@/community/create-post-modal"
 import { isCommunityMediaError } from "@/community/community-data"
@@ -87,7 +89,13 @@ import {
 import { ProjectCommunityContext } from "./project-community-context"
 import { ProjectTimeline } from "./project-timeline"
 import {
+  PROJECT_INDICATOR_COLOR,
+  PROJECT_OVERVIEW_COLOR,
+  PROJECT_OVERVIEW_STROKE_COLOR,
+} from "./project-map-style"
+import {
   createPublicRpcClient,
+  fetchAvailableProjects,
   fetchProjectDetail,
   fetchViewportProjects,
   getMapProviders,
@@ -102,6 +110,7 @@ import {
   type PublicRpcClient,
 } from "./public-projects"
 import { MapDialog } from "./map-dialog"
+import { MockInfrastructurePhotoScan } from "./mock-infrastructure-photo-scan"
 import {
   addPublishedProjectPost,
   optimisticallyVoteProjectPost,
@@ -147,18 +156,6 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   planned: "Planned / not started",
   unknown: "Unknown status",
 }
-
-// MapLibre cannot consume CSS variables, so mirror the CivicLens blue ramp here.
-// Labels and geometry stroke patterns continue to provide the primary distinctions.
-const MAP_STATUS_COLORS: Record<DisplayStatus, string> = {
-  ongoing: "#60a5fa",
-  completed: "#93c5fd",
-  planned: "#3b82f6",
-  unknown: "#64748b",
-}
-
-const PROJECT_INDICATOR_COLOR = "#dc2626"
-const PROJECT_INDICATOR_DARK = "#7f1d1d"
 
 const STATUS_CLASSES: Record<DisplayStatus, string> = {
   ongoing: "border-primary/40 bg-primary/15 text-primary",
@@ -206,6 +203,7 @@ function featureProperties(feature: ViewportFeature) {
     source: feature.source,
     status: feature.rawStatus,
     displayStatus: feature.displayStatus,
+    displayMode: feature.displayMode,
     geometryKind: feature.geometryKind,
     geometrySource: feature.geometrySource ?? "",
     geometryEstimateMethod: feature.geometryEstimateMethod ?? "",
@@ -729,16 +727,19 @@ function ProjectDetailContent({
               : "border-border bg-muted/60 text-muted-foreground"
       }>
         <MapPinned aria-hidden="true" />
-        <AlertTitle>{geometryLabel(detail.geometryKind, detail.geometryEstimateMethod)}</AlertTitle>
+        <AlertTitle>50 m project location indicator</AlertTitle>
         <AlertDescription className="space-y-1">
           <p>
+            The red circle is a display-only location indicator centered on the recorded project point. It is not a measured project boundary.
+          </p>
+          <p>
             {detail.geometryKind === "official"
-              ? `This shape was supplied by ${detail.geometrySource ?? "an official source"}.`
+              ? `The underlying geometry was supplied by ${detail.geometrySource ?? "an official source"}.`
               : detail.geometryKind === "reviewed_estimate"
-                ? "A moderator selected this OpenStreetMap road segment as a plausible project route. It is not an official DPWH boundary."
+                ? "A moderator selected an OpenStreetMap road segment as a plausible project route. It remains an estimate, not an official DPWH boundary."
                 : detail.geometryKind === "automatic_estimate"
-                  ? "This is the nearest eligible OpenStreetMap road or building within 50 m of the recorded project point. It is an automatic approximation, not an official project measurement."
-                  : "No eligible nearby OpenStreetMap feature was available, so this 50 m radius circle is a rough indicator around the recorded project point, not an official boundary."}
+                  ? "The underlying estimate is the nearest eligible OpenStreetMap road or building within 50 m of the recorded project point."
+                  : "No eligible nearby OpenStreetMap feature was available; only the recorded project point supplies location context."}
             {detail.geometrySourceUrl && (
               <a
                 className="ml-1 underline underline-offset-2"
@@ -1208,14 +1209,9 @@ function ProjectDetailDialog({
   )
 }
 
-const AREA_INTERACTIVE_LAYER_IDS = [
-  "project-area-official",
-  "project-area-official-fill",
-  "project-area-reviewed",
-  "project-area-automatic-fill",
-  "project-area-automatic",
-  "project-area-estimated-fill",
-  "project-area-estimated-outline",
+const INDICATOR_INTERACTIVE_LAYER_IDS = [
+  "project-location-indicator-fill",
+  "project-location-indicator-outline",
 ]
 
 function OfficialProjectMap({
@@ -1253,7 +1249,7 @@ function OfficialProjectMap({
         const point = event.point
         const rendered = event.target.queryRenderedFeatures(
           [[point.x - 8, point.y - 8], [point.x + 8, point.y + 8]],
-          { layers: AREA_INTERACTIVE_LAYER_IDS },
+          { layers: INDICATOR_INTERACTIVE_LAYER_IDS },
         )
         const ids = uniqueProjectIds(
           rendered.map((feature) => String(feature.properties?.id ?? feature.id ?? "")),
@@ -1294,18 +1290,6 @@ function OfficialProjectMap({
     [featuresById, mapRef, onSelect],
   )
 
-  const statusColor: ExpressionSpecification = [
-    "match",
-    ["get", "displayStatus"],
-    "ongoing",
-    MAP_STATUS_COLORS.ongoing,
-    "completed",
-    MAP_STATUS_COLORS.completed,
-    "planned",
-    MAP_STATUS_COLORS.planned,
-    MAP_STATUS_COLORS.unknown,
-  ]
-
   return (
     <>
       <MapLibre
@@ -1318,7 +1302,7 @@ function OfficialProjectMap({
         interactiveLayerIds={[
           "project-clusters",
           "projects-unclustered",
-          ...AREA_INTERACTIVE_LAYER_IDS,
+          ...INDICATOR_INTERACTIVE_LAYER_IDS,
         ]}
         onClick={handleClick}
         onMouseEnter={(event) => { event.target.getCanvas().style.cursor = "pointer" }}
@@ -1372,10 +1356,10 @@ function OfficialProjectMap({
             maxzoom={15}
             filter={["has", "point_count"]}
             paint={{
-              "circle-color": PROJECT_INDICATOR_DARK,
+              "circle-color": PROJECT_OVERVIEW_COLOR,
               "circle-radius": ["step", ["get", "point_count"], 18, 25, 22, 100, 28],
               "circle-stroke-width": 2,
-              "circle-stroke-color": "#ffffff",
+              "circle-stroke-color": PROJECT_OVERVIEW_STROKE_COLOR,
             }}
           />
           <Layer
@@ -1395,10 +1379,10 @@ function OfficialProjectMap({
             maxzoom={15}
             filter={["!", ["has", "point_count"]]}
             paint={{
-              "circle-color": PROJECT_INDICATOR_COLOR,
+              "circle-color": PROJECT_OVERVIEW_COLOR,
               "circle-radius": 7,
               "circle-stroke-width": 2,
-              "circle-stroke-color": "#ffffff",
+              "circle-stroke-color": PROJECT_OVERVIEW_STROKE_COLOR,
             }}
           />
           <Layer
@@ -1407,28 +1391,28 @@ function OfficialProjectMap({
             maxzoom={15}
             filter={["==", ["get", "id"], selectedId ?? ""]}
             paint={{
-              "circle-color": "#0f172a",
+              "circle-color": PROJECT_OVERVIEW_COLOR,
               "circle-radius": 12,
               "circle-opacity": 0.2,
               "circle-stroke-width": 2,
-              "circle-stroke-color": "#0f172a",
+              "circle-stroke-color": PROJECT_OVERVIEW_STROKE_COLOR,
             }}
           />
         </Source>
 
         <Source id="project-display-geometries" type="geojson" data={displayGeoJson}>
           <Layer
-            id="project-area-estimated-fill"
+            id="project-location-indicator-fill"
             type="fill"
             minzoom={15}
-            filter={["all", ["==", ["get", "geometryKind"], "estimated"], ["==", ["geometry-type"], "Polygon"]]}
+            filter={["==", ["get", "displayMode"], "location_indicator"]}
             paint={{ "fill-color": PROJECT_INDICATOR_COLOR, "fill-opacity": 0.34 }}
           />
           <Layer
-            id="project-area-estimated-casing"
+            id="project-location-indicator-casing"
             type="line"
             minzoom={15}
-            filter={["==", ["get", "geometryKind"], "estimated"]}
+            filter={["==", ["get", "displayMode"], "location_indicator"]}
             paint={{
               "line-color": "#ffffff",
               "line-width": 6,
@@ -1436,10 +1420,10 @@ function OfficialProjectMap({
             }}
           />
           <Layer
-            id="project-area-estimated-outline"
+            id="project-location-indicator-outline"
             type="line"
             minzoom={15}
-            filter={["==", ["get", "geometryKind"], "estimated"]}
+            filter={["==", ["get", "displayMode"], "location_indicator"]}
             paint={{
               "line-color": PROJECT_INDICATOR_COLOR,
               "line-width": 3,
@@ -1448,69 +1432,38 @@ function OfficialProjectMap({
             }}
           />
           <Layer
-            id="project-area-automatic-fill"
-            type="fill"
-            minzoom={15}
-            filter={["all", ["==", ["get", "geometryKind"], "automatic_estimate"], ["==", ["geometry-type"], "Polygon"]]}
-            paint={{ "fill-color": statusColor, "fill-opacity": 0.25 }}
-          />
-          <Layer
-            id="project-area-automatic"
-            type="line"
-            minzoom={15}
-            filter={["==", ["get", "geometryKind"], "automatic_estimate"]}
-            paint={{
-              "line-color": statusColor,
-              "line-width": ["match", ["geometry-type"], "LineString", 8, 3],
-              "line-opacity": 0.95,
-              "line-dasharray": [1, 1],
-            }}
-          />
-          <Layer
-            id="project-area-reviewed"
-            type="line"
-            minzoom={15}
-            filter={["==", ["get", "geometryKind"], "reviewed_estimate"]}
-            paint={{
-              "line-color": statusColor,
-              "line-width": 7,
-              "line-opacity": 0.95,
-              "line-dasharray": [3, 1],
-            }}
-          />
-          <Layer
-            id="project-area-official-fill"
-            type="fill"
-            minzoom={15}
-            filter={["all", ["==", ["get", "geometryKind"], "official"], ["==", ["geometry-type"], "Polygon"]]}
-            paint={{ "fill-color": statusColor, "fill-opacity": 0.32 }}
-          />
-          <Layer
-            id="project-area-official"
-            type="line"
-            minzoom={15}
-            filter={["==", ["get", "geometryKind"], "official"]}
-            paint={{
-              "line-color": statusColor,
-              "line-width": ["match", ["geometry-type"], "LineString", 8, 3],
-              "line-opacity": 0.95,
-            }}
-          />
-          <Layer
-            id="project-area-selected-fill"
+            id="project-location-selected-fill"
             type="fill"
             minzoom={15}
             filter={["all", ["==", ["get", "id"], selectedId ?? ""], ["==", ["geometry-type"], "Polygon"]]}
-            paint={{ "fill-color": "#ffffff", "fill-opacity": 0.22 }}
+            paint={{ "fill-color": PROJECT_INDICATOR_COLOR, "fill-opacity": 0.18 }}
           />
           <Layer
-            id="project-area-selected-outline"
+            id="project-location-selected-outline"
             type="line"
             minzoom={15}
             filter={["==", ["get", "id"], selectedId ?? ""]}
-            paint={{ "line-color": "#ffffff", "line-width": 5, "line-opacity": 1 }}
+            paint={{ "line-color": "#991b1b", "line-width": 5, "line-opacity": 1 }}
           />
         </Source>
+        {camera.zoom >= 15 && response.features.map((feature) => (
+          <Marker
+            key={feature.id}
+            longitude={feature.coordinates[0]}
+            latitude={feature.coordinates[1]}
+            anchor="bottom"
+            pitchAlignment="viewport"
+            rotationAlignment="viewport"
+            style={{ pointerEvents: "none" }}
+          >
+            <img
+              src={locationPin}
+              alt=""
+              aria-hidden="true"
+              className="size-7 object-contain drop-shadow-md"
+            />
+          </Marker>
+        ))}
       </MapLibre>
 
       <MapDialog
@@ -1518,9 +1471,9 @@ function OfficialProjectMap({
         onOpenChange={(open) => !open && setOverlapChoices([])}
         size="chooser"
         title="Choose a project"
-        description="Multiple highlighted project areas overlap here."
+        description="Multiple project location indicators overlap here."
       >
-        <ul className="min-h-0 flex-1 overflow-y-auto p-3" aria-label="Overlapping infrastructure projects">
+        <ul className="min-h-0 flex-1 overflow-y-auto p-3" aria-label="Overlapping project location indicators">
           {overlapChoices.map((feature) => (
             <li key={feature.id}>
               <button
@@ -1580,6 +1533,7 @@ export function ProjectMapSurface() {
   const providerFailureTimerRef = useRef<number | null>(null)
   const hasResponseRef = useRef(false)
   const lastBoundsRef = useRef(DEFAULT_BOUNDS)
+  const scanFallbackProjectsRef = useRef<readonly ViewportFeature[]>([])
   const failedProvidersRef = useRef(new Set<string>())
   const readyProvidersRef = useRef(new Set<string>())
   const providers = useMemo(() => getMapProviders(), [])
@@ -1608,6 +1562,18 @@ export function ProjectMapSurface() {
       setQueryError(error instanceof Error ? error.message : "Unable to load projects.")
     }
   }, [])
+
+  const loadAvailableScanProjects = useCallback(async () => {
+    if (response.features.length > 0) return response.features
+    if (scanFallbackProjectsRef.current.length > 0) {
+      return scanFallbackProjectsRef.current
+    }
+
+    if (!clientRef.current) clientRef.current = createPublicRpcClient()
+    const available = await fetchAvailableProjects(clientRef.current)
+    scanFallbackProjectsRef.current = available.features
+    return available.features
+  }, [response.features])
 
   useEffect(() => {
     void loadViewport(DEFAULT_BOUNDS)
@@ -1642,7 +1608,9 @@ export function ProjectMapSurface() {
 
   useEffect(() => {
     const feature = response.features.find((item) => item.id === selectedId) ?? null
-    setSelectedFeature(feature)
+    setSelectedFeature((current) =>
+      feature ?? (current?.id === selectedId ? current : null),
+    )
   }, [response.features, selectedId])
 
   const loadDetails = useCallback(async () => {
@@ -1825,48 +1793,40 @@ export function ProjectMapSurface() {
               }
             />
           )}
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="outline"
-                className="absolute bottom-3 left-3 z-10 size-8 rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
-                aria-label="Show project map legend"
-              >
-                <CircleHelp aria-hidden="true" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              side="top"
-              align="start"
-              sideOffset={8}
-              className="w-64 gap-2 rounded-xl bg-background/95 p-3 backdrop-blur-sm"
-            >
-              <p className="font-heading text-xs font-medium">Project map legend</p>
-              <div className="flex items-center gap-2 border-t pt-2 text-xs">
-                <span className="size-3 rounded-full border-2 border-white bg-red-600 ring-1 ring-red-900" aria-hidden="true" />
-                <span>Project location marker</span>
-              </div>
-              <div className="space-y-1 text-xs">
+          <div className="absolute right-3 top-3 z-20">
+            <MockInfrastructurePhotoScan
+              projects={response.features}
+              loadAvailableProjects={loadAvailableScanProjects}
+              onMatch={selectProject}
+            />
+          </div>
+          {response.truncated && (
+            <div className="absolute left-3 right-3 top-14 z-10 rounded-lg border border-primary/30 bg-background/95 px-3 py-2 text-xs text-foreground shadow-sm backdrop-blur-sm">
+              Results are incomplete. Zoom in to see more projects; cluster counts show returned records only.
+            </div>
+          )}
+          <Card
+            size="sm"
+            className="absolute bottom-3 left-3 z-10 max-w-[15rem] gap-0 rounded-xl bg-background/95 py-0 shadow-sm backdrop-blur-sm md:max-w-xs"
+          >
+            <CardHeader className="px-3 pb-2 pt-3">
+              <CardTitle className="text-xs">Project map legend</CardTitle>
+            </CardHeader>
+            <CardContent className="px-3 pb-3">
+              <div className="space-y-2 text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="h-2 w-7 rounded-sm border-2 border-primary bg-primary/25" aria-hidden="true" />
-                  <span>Official project geometry</span>
+                  <span className="size-3 rounded-full border-2 border-blue-200 bg-blue-900" aria-hidden="true" />
+                  <span>Overview project marker or numbered cluster</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-7 border-t-[3px] border-dashed border-secondary-foreground" aria-hidden="true" />
-                  <span>Reviewed OSM estimate</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-7 border-t-[3px] border-dotted border-primary/70" aria-hidden="true" />
-                  <span>Estimated project route/building</span>
-                </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 border-t pt-2">
                   <span className="size-3 rounded-full border-2 border-white bg-red-600 ring-1 ring-red-900" aria-hidden="true" />
-                  <span>Fallback circle · 50 m radius</span>
+                  <span>Detailed project indicator · 50 m radius</span>
                 </div>
+                <p className="text-muted-foreground">
+                  The red pin marks the recorded project point at the center of each detailed circle.
+                </p>
                 <p className="pt-1 text-muted-foreground">
-                  {mapProvider ? `${mapProvider.name} · ` : ""}3D view begins at zoom 15.
+                  Detailed circles are display-only location indicators, not measured project boundaries. {mapProvider ? `${mapProvider.name} · ` : ""}3D view begins at zoom 15.
                 </p>
               </div>
             </PopoverContent>

@@ -199,6 +199,15 @@ export async function fetchViewportProjects(
   return parseViewportPayload(data)
 }
 
+export async function fetchAvailableProjects(
+  client: PublicRpcClient = createPublicRpcClient(),
+): Promise<ViewportResponse> {
+  return fetchViewportProjects(
+    { south: -90, west: -180, north: 90, east: 180 },
+    client,
+  )
+}
+
 export async function fetchProjectDetail(
   projectId: string,
   client: PublicRpcClient = createPublicRpcClient(),

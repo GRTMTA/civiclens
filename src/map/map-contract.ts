@@ -1,3 +1,5 @@
+import { createProjectLocationCircle } from "./project-estimates"
+
 export type DisplayStatus = "ongoing" | "completed" | "planned" | "unknown"
 export type GeometryKind =
   | "official"
@@ -5,6 +7,7 @@ export type GeometryKind =
   | "automatic_estimate"
   | "estimated"
 export type GeometryEstimateMethod = "osm_nearest" | "radius_circle"
+export type ProjectDisplayMode = "location_indicator"
 
 type Position = [number, number]
 
@@ -37,6 +40,7 @@ export type ViewportFeature = {
   displayStatus: DisplayStatus
   coordinates: [number, number]
   displayGeometry: ProjectDisplayGeometry
+  displayMode: ProjectDisplayMode
   geometryKind: GeometryKind
   geometrySource?: string
   geometrySourceUrl?: string
@@ -234,13 +238,13 @@ export function parseViewportPayload(value: unknown): ViewportResponse {
   const features = rawFeatures.flatMap((rawFeature): ViewportFeature[] => {
     const feature = asRecord(rawFeature)
     const properties = asRecord(feature?.properties)
-    const displayGeometry = asProjectDisplayGeometry(feature?.geometry)
+    const sourceGeometry = asProjectDisplayGeometry(feature?.geometry)
     const recordedCoordinates = asCoordinates(properties?.recorded_coordinates)
     const coordinates =
       recordedCoordinates ??
-      (displayGeometry?.type === "Point" ? displayGeometry.coordinates : null)
+      (sourceGeometry?.type === "Point" ? sourceGeometry.coordinates : null)
     const id = asString(properties?.id ?? feature?.id)
-    if (!properties || !displayGeometry || !coordinates || !id) return []
+    if (!properties || !coordinates || !id) return []
 
     return [
       {
@@ -251,7 +255,8 @@ export function parseViewportPayload(value: unknown): ViewportResponse {
         rawStatus: asString(properties.status, "Unknown"),
         displayStatus: normalizeOfficialStatus(asString(properties.status)),
         coordinates,
-        displayGeometry,
+        displayGeometry: createProjectLocationCircle(coordinates[0], coordinates[1]),
+        displayMode: "location_indicator",
         geometryKind: asGeometryKind(properties.geometry_kind),
         geometrySource: asOptionalString(properties.geometry_source),
         geometrySourceUrl: asOptionalString(properties.geometry_source_url),

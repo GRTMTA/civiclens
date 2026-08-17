@@ -4,7 +4,7 @@ import {
   AUTOMATIC_MATCH_RADIUS_METERS,
   FALLBACK_ESTIMATE_RADIUS_METERS,
   classifyProjectEstimate,
-  createFallbackEstimateCircle,
+  createProjectLocationCircle,
   isEligibleOsmFeature,
   selectNearestEstimateCandidate,
 } from "./project-estimates"
@@ -52,8 +52,8 @@ describe("automatic project estimates", () => {
     ])).toBeNull()
   })
 
-  it("creates a closed circular fallback with a 50-meter radius", () => {
-    const circle = createFallbackEstimateCircle(CENTER[0], CENTER[1])
+  it("creates a closed project location circle with a 50-meter radius", () => {
+    const circle = createProjectLocationCircle(CENTER[0], CENTER[1])
     const ring = circle.coordinates[0]
 
     expect(ring).toHaveLength(65)

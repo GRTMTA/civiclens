@@ -69,7 +69,7 @@ describe("official project map contract", () => {
     ).toEqual(expect.objectContaining({ id: "dpwh-1", name: "A project" }))
   })
 
-  it("parses estimated polygons and official lines with recorded coordinates", () => {
+  it("normalizes estimated and official source geometry to location indicators", () => {
     const result = parseViewportPayload({
       type: "FeatureCollection",
       truncated: false,
@@ -110,17 +110,65 @@ describe("official project map contract", () => {
     expect(result.features[0]).toMatchObject({
       geometryKind: "estimated",
       coordinates: [123.9, 10.3],
+      displayMode: "location_indicator",
       displayGeometry: { type: "Polygon" },
     })
     expect(result.features[1]).toMatchObject({
       geometryKind: "official",
       geometrySource: "DPWH official plan",
       geometrySourceUrl: "https://example.gov.ph/geometry",
-      displayGeometry: { type: "LineString" },
+      displayMode: "location_indicator",
+      displayGeometry: { type: "Polygon" },
     })
+    for (const feature of result.features) {
+      const ring = feature.displayGeometry.type === "Polygon"
+        ? feature.displayGeometry.coordinates[0]
+        : []
+      expect(ring).toHaveLength(65)
+      expect(ring[0]).toEqual(ring[ring.length - 1])
+    }
   })
 
-  it("drops malformed display geometry instead of rendering misleading areas", () => {
+  it("normalizes every supported legacy source shape from its recorded point", () => {
+    const sourceGeometries = [
+      { type: "Point", coordinates: [123.8, 10.2] },
+      {
+        type: "MultiLineString",
+        coordinates: [[[123.8, 10.2], [123.81, 10.21]]],
+      },
+      {
+        type: "MultiPolygon",
+        coordinates: [[[[123.8, 10.2], [123.81, 10.2], [123.81, 10.21], [123.8, 10.2]]]],
+      },
+    ]
+    const result = parseViewportPayload({
+      type: "FeatureCollection",
+      features: sourceGeometries.map((geometry, index) => ({
+        type: "Feature",
+        id: `legacy-${index}`,
+        geometry,
+        properties: {
+          id: `legacy-${index}`,
+          recorded_coordinates: [123.9, 10.3],
+          geometry_kind: "official",
+        },
+      })),
+    })
+
+    expect(result.features).toHaveLength(sourceGeometries.length)
+    for (const feature of result.features) {
+      expect(feature).toMatchObject({
+        coordinates: [123.9, 10.3],
+        displayMode: "location_indicator",
+        displayGeometry: { type: "Polygon" },
+      })
+      expect(feature.displayGeometry.type === "Polygon"
+        ? feature.displayGeometry.coordinates[0]
+        : []).toHaveLength(65)
+    }
+  })
+
+  it("uses the recorded point when source display geometry is malformed", () => {
     const result = parseViewportPayload({
       type: "FeatureCollection",
       features: [{
@@ -131,7 +179,12 @@ describe("official project map contract", () => {
       }],
     })
 
-    expect(result.features).toEqual([])
+    expect(result.features).toHaveLength(1)
+    expect(result.features[0]).toMatchObject({
+      id: "broken",
+      displayMode: "location_indicator",
+      displayGeometry: { type: "Polygon" },
+    })
   })
 
   it("deduplicates overlapping layer hits and chooses only when needed", () => {
@@ -214,6 +267,8 @@ describe("reviewed estimate map contract", () => {
     expect(viewport.features[0]).toMatchObject({
       geometryKind: "reviewed_estimate",
       geometrySourceUrl: "https://www.openstreetmap.org/way/123",
+      displayMode: "location_indicator",
+      displayGeometry: { type: "Polygon" },
     })
     expect(detail).toMatchObject({
       geometryKind: "reviewed_estimate",
@@ -249,13 +304,13 @@ describe("automatic estimate map contract", () => {
         },
         {
           type: "Feature",
-          id: "dpwh-rectangle",
+          id: "dpwh-legacy-rectangle",
           geometry: {
             type: "Polygon",
             coordinates: [[[123.9, 10.3], [123.901, 10.3], [123.901, 10.301], [123.9, 10.3]]],
           },
           properties: {
-            id: "dpwh-rectangle",
+            id: "dpwh-legacy-rectangle",
             name: "Fallback building estimate",
             recorded_coordinates: [123.9, 10.3],
             geometry_kind: "estimated",
@@ -271,11 +326,21 @@ describe("automatic estimate map contract", () => {
       geometryEstimateMethod: "osm_nearest",
       geometryEstimateClass: "road",
       geometrySourceUrl: "https://www.openstreetmap.org/way/42",
+      displayMode: "location_indicator",
+      displayGeometry: { type: "Polygon" },
     })
     expect(viewport.features[1]).toMatchObject({
       geometryKind: "estimated",
       geometryEstimateMethod: "radius_circle",
       geometryEstimateClass: "building_area",
+      displayMode: "location_indicator",
+      displayGeometry: { type: "Polygon" },
     })
+    const fallbackRing = viewport.features[1].displayGeometry.type === "Polygon"
+      ? viewport.features[1].displayGeometry.coordinates[0]
+      : []
+    expect(fallbackRing).toHaveLength(65)
+    expect(fallbackRing[0]).toEqual(fallbackRing[fallbackRing.length - 1])
+    expect(fallbackRing).not.toContainEqual([123.901, 10.3])
   })
 })
