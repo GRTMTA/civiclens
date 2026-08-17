@@ -18,7 +18,13 @@ import "./route-transitions.css";
 
 const SPOTLIGHT_RADIUS = 240;
 
-function Landing({ onSignIn }: { onSignIn: () => void }) {
+function Landing({
+  onSignIn,
+  isAuthenticated,
+}: {
+  onSignIn: () => void;
+  isAuthenticated: boolean;
+}) {
   const mouse = useRef({ x: -999, y: -999 });
   const smooth = useRef({ x: -999, y: -999 });
   const layer = useRef<HTMLDivElement>(null);
@@ -99,9 +105,11 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
         <div className="civic-brand">
           <ShieldCheck /> CivicLens
         </div>
-        <button className="civic-sign-in" onClick={onSignIn}>
-          Sign in
-        </button>
+        {!isAuthenticated && (
+          <button className="civic-sign-in" onClick={onSignIn}>
+            Sign in
+          </button>
+        )}
         <div className="civic-heading">
           <h1>
             <em>What looks</em>
@@ -441,7 +449,6 @@ function App() {
       setSession(next);
       if (event === "SIGNED_IN") {
         setConfirmError(null);
-        openCommunity();
       } else if (event === "SIGNED_OUT") {
         navigate(LANDING_PATH, true);
       }
@@ -513,7 +520,12 @@ function App() {
   // than quietly rendering the landing page at the wrong URL.
   if (!isAppPath(path)) return <NotFound onHome={openLanding} />;
 
-  return <Landing onSignIn={() => navigateAuth("sign-in")} />;
+  return (
+    <Landing
+      onSignIn={() => navigateAuth("sign-in")}
+      isAuthenticated={Boolean(session)}
+    />
+  );
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
