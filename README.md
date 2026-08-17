@@ -96,7 +96,7 @@ Mandatory release QA: verify provider attribution is visible; OpenFreeMap is att
 
 Map data is requested through the public `dpwh-projects` Edge Function, which proxies the official DPWH Transparency API used by the [reference scraper](https://github.com/csiiiv/dpwh-transparency-data-api-scraper). This avoids storing the full dataset in Supabase.
 
-The demo fetches one configurable source page, caches it in the warm function instance for five minutes, filters valid coordinates to the current map bounds, and returns at most 500 markers. Selecting a marker loads its contract details on demand. Configure the page and size with `DPWH_DEMO_PAGE` and `DPWH_DEMO_LIMIT`; the API currently documents a maximum page size of 5,000.
+The demo fetches one configurable source page, caches it in the warm function instance for five minutes, filters valid coordinates to the current map bounds, and returns at most 500 markers. Selecting a marker loads its contract details on demand. Configure the page and size with `DPWH_DEMO_PAGE` and `DPWH_DEMO_LIMIT`; the default size is 500 to reduce upstream timeouts, while the API documents a maximum of 5,000.
 
 This is intentionally a hackathon integration. The upstream service can rate-limit or block automated requests, and one page is not a complete geographic index. Choose a page containing the projects you plan to demonstrate, keep refreshes modest, and retain visible DPWH attribution.
 

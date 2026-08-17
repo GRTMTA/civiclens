@@ -10,7 +10,9 @@
  * in resident, which the RPC grants enforce.
  */
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import type { SupabaseClient } from "@supabase/supabase-js"
+
+import { supabase } from "@/supabase"
 
 import {
   buildCommentTree,
@@ -719,16 +721,15 @@ export function createSupabaseSource(client: SupabaseClient): CommunitySource {
       if (!user) return null
       const { data: profile } = await client
         .from("profiles")
-        .select("display_name, username, bio, avatar_path")
+        .select("display_name")
         .eq("id", user.id)
         .maybeSingle()
-      const avatarPath = asString(profile?.avatar_path)
       return {
         id: user.id,
         name: asString(profile?.display_name) || user.email?.split("@")[0] || "You",
-        username: asString(profile?.username) || null,
-        avatarUrl: avatarPath ? publicUrl(AVATAR_BUCKET, avatarPath) : null,
-        bio: asString(profile?.bio),
+        username: null,
+        avatarUrl: null,
+        bio: "",
       }
     },
   }
@@ -753,6 +754,6 @@ export function getCommunitySource(): CommunitySource {
     )
   }
 
-  source = createSupabaseSource(createClient(url, key))
+  source = createSupabaseSource(supabase)
   return source
 }

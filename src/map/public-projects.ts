@@ -1,5 +1,5 @@
-import { createClient } from "@supabase/supabase-js"
 import type { FillExtrusionLayerSpecification, StyleSpecification } from "maplibre-gl"
+import { supabase } from "@/supabase"
 import {
   parseProjectDetail,
   parseViewportPayload,
@@ -142,7 +142,7 @@ export function createPublicRpcClient(): PublicRpcClient {
       "Project data configuration is required to load the official map.",
     )
   }
-  const client = createClient(url, key)
+  const client = supabase
   return {
     rpc: async (functionName, args) => {
       const { data, error } = await client.rpc(functionName, args)

@@ -7,6 +7,43 @@ const pageCache = new Map<string, { expiresAt: number; records: Record<string, u
 type Bounds = { south: number; west: number; north: number; east: number };
 type Point = { latitude: number; longitude: number };
 
+const DEMO_PROJECTS: Record<string, unknown>[] = [
+  {
+    contractId: 'demo-cebu-road',
+    description: 'Cebu South Coastal Road rehabilitation (hackathon demo)',
+    category: 'Roads',
+    status: 'Ongoing',
+    budget: 185000000,
+    progress: 62,
+    contractor: 'Demo contractor',
+    infraYear: '2026',
+    programName: 'Hackathon demonstration',
+    sourceOfFunds: 'Demo data only',
+    location: {
+      province: 'Cebu City',
+      coordinates: { latitude: 10.2897, longitude: 123.8818 },
+    },
+    demo: true,
+  },
+  {
+    contractId: 'demo-mandaue-flood',
+    description: 'Mandaue flood-control improvement (hackathon demo)',
+    category: 'Flood Control and Drainage',
+    status: 'Under construction',
+    budget: 92000000,
+    progress: 41,
+    contractor: 'Demo contractor',
+    infraYear: '2026',
+    programName: 'Hackathon demonstration',
+    sourceOfFunds: 'Demo data only',
+    location: {
+      province: 'Mandaue City, Cebu',
+      coordinates: { latitude: 10.3236, longitude: 123.9418 },
+    },
+    demo: true,
+  },
+];
+
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -53,22 +90,34 @@ function unwrapProjects(payload: unknown): Record<string, unknown>[] {
 }
 
 async function fetchDpwh(path: string): Promise<unknown> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      Accept: 'application/json, text/plain, */*',
-      Origin: 'https://transparency.dpwh.gov.ph',
-      Referer: 'https://transparency.dpwh.gov.ph/',
-    },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`DPWH returned HTTP ${response.status}`);
-  return response.json();
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetch(`${API_BASE}${path}`, {
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          Origin: 'https://transparency.dpwh.gov.ph',
+          Referer: 'https://transparency.dpwh.gov.ph/',
+          'User-Agent': 'Mozilla/5.0 CivicLens-Hackathon-Demo/1.0',
+        },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!response.ok) throw new Error(`DPWH returned HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 750));
+    }
+  }
+  throw lastError;
 }
+
 async function pageRecords(page: number, limit: number) {
   const key = `${page}:${limit}`;
   const cached = pageCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.records;
   const records = unwrapProjects(await fetchDpwh(`?page=${page}&limit=${limit}`));
+  if (records.length === 0) throw new Error('DPWH returned no project records');
   pageCache.set(key, { records, expiresAt: Date.now() + CACHE_TTL_MS });
   return records;
 }
@@ -87,6 +136,10 @@ function estimatedArea({ latitude, longitude }: Point) {
   return { type: 'Polygon', coordinates: [coordinates] };
 }
 
+function projectSource(project: Record<string, unknown>): string {
+  return project.demo === true ? 'CivicLens hackathon demo data' : 'DPWH Transparency Portal';
+}
+
 function asFeature(project: Record<string, unknown>) {
   const id = contractId(project);
   const coordinates = point(project);
@@ -99,7 +152,7 @@ function asFeature(project: Record<string, unknown>) {
       id: `dpwh-${id}`,
       name: text(project.description, `DPWH contract ${id}`),
       category: text(project.category ?? project.infraType, 'unknown'),
-      source: 'DPWH Transparency Portal',
+      source: projectSource(project),
       status: text(project.status, 'Unknown'),
       recorded_coordinates: [coordinates.longitude, coordinates.latitude],
       geometry_kind: 'estimated',
@@ -117,8 +170,10 @@ function asDetail(payload: unknown, requestedId: string) {
   const location = record(project.location);
   return {
     id: `dpwh-${id}`,
-    source: 'DPWH Transparency Portal',
-    source_url: `https://transparency.dpwh.gov.ph/projects/${encodeURIComponent(id)}`,
+    source: projectSource(project),
+    source_url: project.demo === true
+      ? 'https://github.com/csiiiv/dpwh-transparency-data-api-scraper'
+      : `https://transparency.dpwh.gov.ph/projects/${encodeURIComponent(id)}`,
     name: text(project.description, `DPWH contract ${id}`),
     category: text(project.category ?? project.infraType, 'unknown'),
     description: text(project.description),
@@ -164,7 +219,7 @@ Deno.serve(async (request) => {
     const bounds = parseBounds(url);
     if (!bounds) return json({ error: 'Valid map bounds are required.' }, 400);
     const configuredPage = Number(Deno.env.get('DPWH_DEMO_PAGE') ?? '1');
-    const configuredLimit = Number(Deno.env.get('DPWH_DEMO_LIMIT') ?? '5000');
+    const configuredLimit = Number(Deno.env.get('DPWH_DEMO_LIMIT') ?? '500');
     const page = Number.isInteger(configuredPage) && configuredPage > 0 ? configuredPage : 1;
     const limit = Number.isInteger(configuredLimit)
       ? Math.min(5000, Math.max(1, configuredLimit))
